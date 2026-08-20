@@ -152,7 +152,23 @@ export function buildDefinitions() {
       .addStringOption(userOption),
     new SlashCommandBuilder()
       .setName("ticketpanel")
-      .setDescription("Post the ticket panel (User Report / Support Ticket buttons) in this channel"),
+      .setDescription("Post the ticket panel(s) in this channel")
+      .addStringOption((o) =>
+        o
+          .setName("type")
+          .setDescription("Which panel to post here (default: both)")
+          .addChoices(
+            { name: "Both panels", value: "both" },
+            { name: "Exploiter Report only", value: "report" },
+            { name: "General Support only", value: "support" }
+          )
+      )
+      .addAttachmentOption((o) =>
+        o.setName("report_image").setDescription("Banner image for the Exploiter Report panel")
+      )
+      .addAttachmentOption((o) =>
+        o.setName("support_image").setDescription("Banner image for the General Support panel")
+      ),
     new SlashCommandBuilder()
       .setName("close")
       .setDescription("Close this ticket. Report tickets need reporter + player (+ evidence).")
@@ -552,8 +568,15 @@ export function buildHandlers({ queries, roblox, config, service, tickets }) {
     },
 
     async ticketpanel(interaction) {
-      await tickets.postPanel(interaction.channel);
-      await interaction.editReply({ content: "Ticket panel posted." });
+      const type = interaction.options.getString("type") || "both";
+      await tickets.postPanel(interaction.channel, {
+        type,
+        reportImage: interaction.options.getAttachment("report_image"),
+        supportImage: interaction.options.getAttachment("support_image"),
+      });
+      await interaction.editReply({
+        content: type === "both" ? "Both panels posted." : "Panel posted.",
+      });
     },
 
     async close(interaction) {

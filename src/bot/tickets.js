@@ -36,38 +36,96 @@ export function createTicketSystem({ client, config, queries }) {
     ...config.discord.seniorRoleIds,
   ];
 
-  const modPing = () =>
-    config.discord.modRoleIds.map((id) => `<@&${id}>`).join(" ") || "@here";
+  const pingRoleIds = config.discord.ticketPingRoleIds.length
+    ? config.discord.ticketPingRoleIds
+    : config.discord.modRoleIds;
+  const modPing = () => pingRoleIds.map((id) => `<@&${id}>`).join(" ") || "@here";
 
   const dashboardTicketLink = (id) => `${config.web.baseUrl}/#/ticket/${id}`;
 
-  /* ── panel ────────────────────────────────────────────── */
+  /* ── panels ───────────────────────────────────────────── */
 
-  async function postPanel(channel) {
-    await channel.send({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(COLORS.support)
-          .setTitle("Need a moderator?")
-          .setDescription(
-            "**User Report** — report a player for exploiting or breaking the rules. " +
-              "A private channel opens with the mod team.\n\n" +
-              "**Support Ticket** — anything else: questions, appeals, problems."
+  const PANEL_WARNING =
+    "Misuse of the ticket system will result to you being permanently unable to use them in the future.";
+
+  const REPORT_PANEL_TEXT =
+    PANEL_WARNING +
+    "\n\n> This ticket should **ONLY** be used for reporting exploiters in-game." +
+    "\n> Do **NOT** use this ticket for reporting bugs, asking for roles, or bugging staff." +
+    "\n\nPlease ensure in your evidence you are CLEARLY able to see the exploiters username, " +
+    "you can do this by simply opening up the leader-board and clicking on the person." +
+    "\nIf we can't see the username, we CANT ban them. We also need distinct visual proof " +
+    "(clear recordings), we don't expect Ultra-HD recordings but we need to be able to make " +
+    "out what is happening to help.";
+
+  const SUPPORT_PANEL_TEXT =
+    PANEL_WARNING +
+    "\n\n> Use this ticket to;" +
+    "\n> • Report people in the Discord Server" +
+    "\n> • Dispute an in-game ban" +
+    "\n> • Report Staff for misconduct" +
+    "\n> • And anything else that can't be solved with relative information around the server!" +
+    "\n\nPlease remember that staff are people too, we can't be on tickets 24/7 so it may take " +
+    "some time for your ticket to be answered but we WILL get to it eventually." +
+    "\n\nTickets that staff cannot help you with will be closed by our staff, continued " +
+    "re-opening of tickets for the same issue AFTER them being closed will result in punishment.";
+
+  /** Download a Discord attachment so the banner lives on the panel message forever. */
+  async function bannerFile(attachment, name) {
+    if (!attachment) return null;
+    const res = await fetch(attachment.url);
+    if (!res.ok) throw new Error("couldn't download the banner image");
+    const ext = (attachment.name?.match(/\.\w+$/) || [".png"])[0];
+    const { AttachmentBuilder } = await import("discord.js");
+    return {
+      file: new AttachmentBuilder(Buffer.from(await res.arrayBuffer()), { name: name + ext }),
+      ref: `attachment://${name}${ext}`,
+    };
+  }
+
+  async function postPanel(channel, { type = "both", reportImage, supportImage } = {}) {
+    if (type === "support" || type === "both") {
+      const banner = await bannerFile(supportImage, "support-banner");
+      const embed = new EmbedBuilder()
+        .setColor(0x5865f2)
+        .setTitle("GENERAL SUPPORT")
+        .setDescription(SUPPORT_PANEL_TEXT);
+      if (banner) embed.setImage(banner.ref);
+      await channel.send({
+        embeds: [embed],
+        files: banner ? [banner.file] : [],
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("wardenTicket:open:support")
+              .setLabel("Open a ticket!")
+              .setEmoji("📩")
+              .setStyle(ButtonStyle.Primary)
           ),
-      ],
-      components: [
-        new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setCustomId("wardenTicket:open:report")
-            .setLabel("User Report")
-            .setStyle(ButtonStyle.Danger),
-          new ButtonBuilder()
-            .setCustomId("wardenTicket:open:support")
-            .setLabel("Support Ticket")
-            .setStyle(ButtonStyle.Primary)
-        ),
-      ],
-    });
+        ],
+      });
+    }
+    if (type === "report" || type === "both") {
+      const banner = await bannerFile(reportImage, "report-banner");
+      const embed = new EmbedBuilder()
+        .setColor(0xed4245)
+        .setTitle("EXPLOITER REPORT")
+        .setDescription(REPORT_PANEL_TEXT);
+      if (banner) embed.setImage(banner.ref);
+      await channel.send({
+        embeds: [embed],
+        files: banner ? [banner.file] : [],
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("wardenTicket:open:report")
+              .setLabel("Create a Report!")
+              .setEmoji("⚔️")
+              .setStyle(ButtonStyle.Danger)
+          ),
+        ],
+      });
+    }
   }
 
   /* ── open flow: button → modal → channel ─────────────── */

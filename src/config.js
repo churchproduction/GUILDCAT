@@ -46,6 +46,7 @@ export const config = {
     logChannelId: env("LOG_CHANNEL_ID", null),
     reportChannelId: env("REPORT_CHANNEL_ID", null),     // in-game exploit reports land here
     ticketCategoryId: env("TICKET_CATEGORY_ID", null),   // ticket channels are created under this category
+    ticketPingRoleIds: idList("TICKET_PING_ROLE_IDS"),   // pinged when a ticket opens (falls back to MOD_ROLE_IDS)
   },
   game: {
     reportSecret: env("GAME_REPORT_SECRET", null),       // shared secret the game script sends

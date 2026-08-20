@@ -20,7 +20,7 @@ sentences, evidence, and each player's full audit history.
 | `/note user text [evidence]` | Moderators | Attaches a staff note to their record. |
 | `/evidence user [file] [link] [context]` | Moderators | Adds evidence to a player's record on its own. |
 | `/audit user` | Moderators | Full record: live ban + dungeon status, counts, recent history, dashboard link. |
-| `/ticketpanel` | **Senior staff** | Posts the ticket panel (User Report / Support Ticket buttons) in the current channel. |
+| `/ticketpanel [type] [report_image] [support_image]` | **Senior staff** | Posts the ticket panels in the current channel — the red "EXPLOITER REPORT" panel and/or the blue "GENERAL SUPPORT" panel, each with its own button. Attach banner images to match your server's look. Opening a ticket pings `TICKET_PING_ROLE_IDS` (or the mod roles if unset). |
 | `/close [reporter] [player] [evidence] [notes]` | Moderators | Closes the ticket you run it in. Support tickets need no options. **User-report tickets require** `reporter` (their Discord user) + `player` (the reported Roblox username) — closing files a "Player report" entry with the evidence on that player's record. |
 
 `user` accepts a username, a numeric user ID, or a profile URL everywhere.
