@@ -27,6 +27,13 @@ const { checkStaff, bridge } = await startBot({ config, queries, roblox, service
 const app = createWebServer({ config, queries, roblox, service, checkStaff, bridge, audit });
 app.listen(config.web.port, () => {
   console.log(`Web: dashboard on ${config.web.baseUrl} (port ${config.web.port})`);
+  // Confirm the honeypot wiring right in the boot log, so it's obvious if a var is missing.
+  console.log(
+    `Honeypot: channel ${config.honeypot.channelId ? "set ✓" : "NOT SET ✗"}, ` +
+    `admin roles ${config.honeypot.adminRoleIds.length || "NONE ✗"}, ` +
+    `game secret ${config.game.reportSecret ? "set ✓" : "NOT SET ✗"}, ` +
+    `sentence ${config.honeypot.sentence}`
+  );
 });
 
 process.on("unhandledRejection", (err) => {

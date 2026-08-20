@@ -109,10 +109,13 @@ export function createWebServer({ config, queries, roblox, service, checkStaff, 
      `total` is the player's running total across all traps and sessions —
      a resend with the same or lower total is dropped as a duplicate. */
   const trapRoute = async (req, res) => {
+    console.log(`[trap] hit received from ${req.ip} — body keys: ${Object.keys(req.body ?? {}).join(",") || "(none)"}`);
     if (!config.game.reportSecret) {
+      console.warn("[trap] rejected: GAME_REPORT_SECRET not configured");
       return res.status(503).json({ error: "GAME_REPORT_SECRET is not configured" });
     }
     if (req.get("x-warden-key") !== config.game.reportSecret) {
+      console.warn("[trap] rejected: bad or missing x-warden-key");
       return res.status(401).json({ error: "bad key" });
     }
     const b = req.body ?? {};
@@ -120,8 +123,10 @@ export function createWebServer({ config, queries, roblox, service, checkStaff, 
     const userId = parseInt(who.id, 10);
     const remoteName = String(b.remote ?? "").trim().slice(0, 80);
     if (!Number.isInteger(userId) || userId <= 0 || !remoteName) {
+      console.warn("[trap] rejected: missing user.id or remote");
       return res.status(400).json({ error: "user.id and remote are required" });
     }
+    console.log(`[trap] ${who.name ?? userId} (${userId}) fired "${remoteName}" total=${b.total ?? "?"}`);
     const total = Number.isInteger(parseInt(b.total, 10)) ? parseInt(b.total, 10) : null;
 
     const hasPending = queries.userHasPendingHoneypot(userId);

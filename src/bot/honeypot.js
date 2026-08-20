@@ -41,13 +41,20 @@ export function createHoneypot({ client, config, queries, service }) {
   /* ── a new catch arrives (called by the web server) ────── */
 
   async function postHit(hit, { firstForUser, avatarUrl }) {
-    if (!config.honeypot.channelId) return;
+    if (!config.honeypot.channelId) {
+      console.warn("[trap] HONEYPOT_CHANNEL_ID is not set — hit stored but not posted");
+      return;
+    }
     // A looping exploit can fire hundreds of times — only the user's FIRST
     // pending catch gets its own message; the rest just stack in the database.
     if (!firstForUser) return;
     try {
       const channel = await client.channels.fetch(config.honeypot.channelId);
-      if (!channel?.isTextBased()) return;
+      if (!channel?.isTextBased()) {
+        console.warn(`[trap] channel ${config.honeypot.channelId} isn't a text channel the bot can post to`);
+        return;
+      }
+      console.log(`[trap] posting hit to #${channel.name ?? config.honeypot.channelId}`);
 
       const pendingUsers = queries.pendingHoneypotUserCount();
       const join = joinServerUrl(hit.place_id, hit.job_id);
