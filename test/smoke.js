@@ -224,7 +224,11 @@ const robloxStub = {
   publishDungeonMove: async () => ({}),
   kickUser: async () => ({}),
 };
-const service = createModerationService({ queries: q, roblox: robloxStub, config });
+const auditEvents = [];
+const service = createModerationService({
+  queries: q, roblox: robloxStub, config,
+  audit: (source, event) => auditEvents.push({ source, ...event }),
+});
 const checkStaffStub = async (id) =>
   id === "senior1" ? { id, username: "seniorTester", senior: true }
   : id === "mod1" ? { id, username: "modTester", senior: false }
@@ -379,6 +383,13 @@ res = await fetch(`${base}/api/mod/warn`, {
 });
 assert.equal(res.status, 400);
 ok("unknown player → 400");
+
+// audit events carried the right source + details
+assert.ok(auditEvents.some((e) => e.source === "web" && e.type === "ban" && e.player.id === 111));
+assert.ok(auditEvents.some((e) => e.source === "web" && e.type === "dungeon"));
+assert.ok(auditEvents.some((e) => e.source === "web" && e.type === "delete" && e.deleted?.type === "dungeon"));
+assert.ok(auditEvents.every((e) => e.moderator?.name));
+ok("audit events fired with web source and details");
 
 server.close();
 fs.rmSync(tmp, { recursive: true, force: true });

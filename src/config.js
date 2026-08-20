@@ -56,6 +56,10 @@ export const config = {
     dir: env("EVIDENCE_DIR", "./evidence"),
     maxMb: Number(env("EVIDENCE_MAX_MB", "25")),
   },
+  webhooks: {
+    discord: env("DISCORD_AUDIT_WEBHOOK", null), // actions run via Discord commands
+    web: env("WEB_AUDIT_WEBHOOK", null),         // actions taken on the website
+  },
   web: {
     sessionSecret: env("SESSION_SECRET"),
     baseUrl: env("BASE_URL", "http://localhost:3000").replace(/\/+$/, ""),

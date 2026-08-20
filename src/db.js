@@ -330,6 +330,9 @@ export function makeQueries(db) {
 
     getEvidence: (id) => db.prepare(`SELECT * FROM evidence WHERE id = ?`).get(id),
 
+    getAction: (id) =>
+      db.prepare(`SELECT ${ACTION_COLS} FROM actions a ${PLAYER_JOIN} WHERE a.id = ?`).get(id),
+
     userHistory: (userId) =>
       withEvidence(
         db

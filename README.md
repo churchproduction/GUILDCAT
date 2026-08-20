@@ -159,6 +159,20 @@ Buttons senior staff can use simply don't render for normal mods — and the
 server would refuse them anyway. Works on phones: the sidebar becomes a
 bottom tab bar.
 
+## Audit webhooks
+
+Two optional Discord webhook feeds, so every judgment is witnessed:
+
+- `DISCORD_AUDIT_WEBHOOK` — every action run through **Discord commands**
+- `WEB_AUDIT_WEBHOOK` — everything done on the **website**: web bans, unbans,
+  dungeon sends, releases, kicks, warns, notes, and **deleted log entries**
+  (the deletion post shows what the entry said and who deleted it)
+
+Create each in Discord: pick a channel → Edit Channel → Integrations →
+Webhooks → New Webhook → Copy Webhook URL → paste into the env var. Set one,
+both, or neither. Posts are fire-and-forget — a down webhook never blocks or
+slows an action.
+
 ## Troubleshooting
 
 - **`/ban` returns 401/403** — the API key is missing User Restrictions write

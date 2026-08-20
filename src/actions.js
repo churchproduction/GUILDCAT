@@ -6,7 +6,12 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { isoPlusSeconds, clamp } from "./format.js";
 
-export function createModerationService({ queries, roblox, config }) {
+export function createModerationService({ queries, roblox, config, audit }) {
+  // Post to the right audit feed. moderator.via is "discord" or "web".
+  const emit = (moderator, event) => {
+    try { audit?.(moderator.via ?? "discord", { ...event, moderator }); } catch {}
+  };
+
   /** Resolve query (username/id/url) and enrich with avatar + join date. */
   async function resolvePlayer(query) {
     const found = await roblox.resolveUser(query);
@@ -50,6 +55,7 @@ export function createModerationService({ queries, roblox, config }) {
         },
         player
       );
+      emit(moderator, { type: "ban", player, reason, durationSeconds, includeAlts });
       return { actionId, expiresAt };
     },
 
@@ -66,6 +72,7 @@ export function createModerationService({ queries, roblox, config }) {
         },
         player
       );
+      emit(moderator, { type: "unban", player, reason });
       return { actionId };
     },
 
@@ -97,6 +104,7 @@ export function createModerationService({ queries, roblox, config }) {
         },
         player
       );
+      emit(moderator, { type: "dungeon", player, reason, durationSeconds });
       return { actionId };
     },
 
@@ -118,6 +126,7 @@ export function createModerationService({ queries, roblox, config }) {
         },
         player
       );
+      emit(moderator, { type: "release", player, reason });
       return { actionId };
     },
 
@@ -134,39 +143,40 @@ export function createModerationService({ queries, roblox, config }) {
         },
         player
       );
+      emit(moderator, { type: "kick", player, reason });
       return { actionId };
     },
 
     warn(player, { reason, moderator }) {
-      return {
-        actionId: queries.recordAction(
-          {
-            type: "warn",
-            user_id: player.id,
-            username: player.name,
-            reason,
-            moderator_id: moderator.id,
-            moderator_name: moderator.name,
-          },
-          player
-        ),
-      };
+      const actionId = queries.recordAction(
+        {
+          type: "warn",
+          user_id: player.id,
+          username: player.name,
+          reason,
+          moderator_id: moderator.id,
+          moderator_name: moderator.name,
+        },
+        player
+      );
+      emit(moderator, { type: "warn", player, reason });
+      return { actionId };
     },
 
     note(player, { text, moderator }) {
-      return {
-        actionId: queries.recordAction(
-          {
-            type: "note",
-            user_id: player.id,
-            username: player.name,
-            reason: text,
-            moderator_id: moderator.id,
-            moderator_name: moderator.name,
-          },
-          player
-        ),
-      };
+      const actionId = queries.recordAction(
+        {
+          type: "note",
+          user_id: player.id,
+          username: player.name,
+          reason: text,
+          moderator_id: moderator.id,
+          moderator_name: moderator.name,
+        },
+        player
+      );
+      emit(moderator, { type: "note", player, reason: text });
+      return { actionId };
     },
 
     /** Store downloaded bytes as evidence on an action. */
@@ -201,13 +211,15 @@ export function createModerationService({ queries, roblox, config }) {
      * ACTIVE ban or dungeon sentence — lift it first so records match reality.
      * Returns { ok, blocked?, evidenceFiles? }.
      */
-    async deleteAction(actionId) {
+    async deleteAction(actionId, moderator) {
+      const deleted = queries.getAction(actionId); // grab details BEFORE it's gone
       const result = queries.deleteAction(actionId);
       if (!result.ok) return result;
       // best-effort disk cleanup after the DB commit
       for (const fileName of result.evidenceFiles) {
         fs.unlink(path.join(config.evidence.dir, fileName)).catch(() => {});
       }
+      if (moderator) emit(moderator, { type: "delete", deleted });
       return result;
     },
   };

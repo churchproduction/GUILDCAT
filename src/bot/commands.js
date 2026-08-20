@@ -171,6 +171,7 @@ export function buildHandlers({ queries, roblox, config, service }) {
   const moderatorOf = (interaction) => ({
     id: interaction.user.id,
     name: interaction.user.username,
+    via: "discord",
   });
 
   async function resolveOrFail(interaction, query) {

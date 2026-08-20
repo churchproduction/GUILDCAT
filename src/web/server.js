@@ -209,7 +209,7 @@ export function createWebServer({ config, queries, roblox, service, checkStaff }
     requireStaff(needSenior),
     async (req, res) => {
       try {
-        const moderator = { id: req.staff.id, name: req.staff.username };
+        const moderator = { id: req.staff.id, name: req.staff.username, via: "web" };
         const result = await fn(req.body ?? {}, moderator);
         res.json({ ok: true, ...result });
       } catch (err) {
@@ -311,7 +311,11 @@ export function createWebServer({ config, queries, roblox, service, checkStaff }
   app.delete("/api/mod/actions/:id", requireStaff(true), async (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "bad id" });
-    const result = await service.deleteAction(id);
+    const result = await service.deleteAction(id, {
+      id: req.staff.id,
+      name: req.staff.username,
+      via: "web",
+    });
     if (!result.ok) {
       if (result.blocked) {
         return res.status(409).json({
