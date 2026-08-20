@@ -61,7 +61,9 @@ export function registerAuthRoutes(app, { config, checkStaff }) {
       }
 
       req.session.user = staff;
-      res.redirect("/");
+      // welcome=1 lets the app skip the entrance screen just this once,
+      // so signing in doesn't ask for a second ENTER.
+      res.redirect("/?welcome=1");
     } catch (err) {
       console.error("OAuth callback failed:", err);
       res.status(500).send(deniedPage("Sign-in failed on our side. Try again in a minute."));

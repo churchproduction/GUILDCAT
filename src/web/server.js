@@ -38,9 +38,17 @@ export function createWebServer({ config, queries, roblox, service, checkStaff }
     return { limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE, page };
   };
 
-  app.get("/api/me", (req, res) => {
+  // Re-check the member's roles on every load, so rank changes (or a stale
+  // pre-update session) never show the wrong buttons.
+  app.get("/api/me", async (req, res) => {
     if (!req.session?.user) return res.status(401).json({ error: "not signed in" });
-    res.json({ user: req.session.user });
+    const staff = await checkStaff(req.session.user.id);
+    if (!staff) {
+      req.session = null;
+      return res.status(401).json({ error: "no longer staff" });
+    }
+    req.session.user = staff;
+    res.json({ user: staff });
   });
 
   app.get("/api/stats", requireAuth, (req, res) => {

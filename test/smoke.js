@@ -228,6 +228,7 @@ const service = createModerationService({ queries: q, roblox: robloxStub, config
 const checkStaffStub = async (id) =>
   id === "senior1" ? { id, username: "seniorTester", senior: true }
   : id === "mod1" ? { id, username: "modTester", senior: false }
+  : id === "1" ? { id, username: "tester", senior: false }
   : null;
 const app = createWebServer({
   config, queries: q, roblox: robloxStub, service,

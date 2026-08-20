@@ -144,7 +144,7 @@ input::placeholder{color:var(--ink-3)}
 .bydim{color:var(--ink-3);font-size:13px}
 .when{color:var(--ink-3);font-size:12.5px;font-variant-numeric:tabular-nums}
 .rowactions{display:flex;gap:6px;justify-content:flex-end}
-@media (hover:hover){ .rowactions{opacity:0;transition:opacity .12s} .row:hover .rowactions{opacity:1} }
+@media (hover:hover){ .rowactions{opacity:.45;transition:opacity .12s} .row:hover .rowactions{opacity:1} }
 
 .pcell{display:flex;align-items:center;gap:11px;cursor:pointer;min-width:0;text-decoration:none}
 .pav{width:34px;height:34px;border-radius:9px;background:var(--surface-3);display:grid;place-items:center;
@@ -199,7 +199,7 @@ input::placeholder{color:var(--ink-3)}
 .tby{color:var(--ink-3);font-size:12.5px}
 .tbody{color:var(--ink-2);margin-top:6px;overflow-wrap:anywhere}
 .textra{color:var(--ink-3);font-size:12.5px;margin-top:3px}
-.del{opacity:0;transition:opacity .12s}
+.del{opacity:.45;transition:opacity .12s}
 .timeline li:hover .del{opacity:1}
 @media (hover:none){ .del,.rowactions{opacity:1} }
 .evwrap{display:flex;gap:9px;margin-top:11px;flex-wrap:wrap;align-items:flex-start}

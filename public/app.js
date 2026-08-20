@@ -18,6 +18,7 @@ async function send(method, path, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   if (res.status === 401) {
+    me = null;
     showEntrance();
     throw new Error("unauthenticated");
   }
@@ -259,12 +260,24 @@ function initEntranceFx() {
 }
 
 function showEntrance() {
-  me = null;
   $("#shell").hidden = true;
   $("#mtop").hidden = true;
   $("#mnav").hidden = true;
-  $("#enter").hidden = false;
+  const e = $("#enter");
+  e.classList.remove("gone");
+  e.hidden = false;
   initEntranceFx();
+  $("#enterBtn").onclick = () => {
+    if (me) {
+      e.classList.add("gone");
+      setTimeout(() => { e.hidden = true; }, 700);
+      showPanel();
+    } else {
+      // remember where they were headed (e.g. a #/user/123 link from Discord)
+      try { sessionStorage.setItem("afterLogin", location.hash || "#/"); } catch {}
+      location.href = "/auth/login";
+    }
+  };
 }
 
 function showOffline(openedAsFile) {
@@ -700,12 +713,29 @@ window.route = route;
 window.addEventListener("hashchange", route);
 
 (async function boot() {
+  const params = new URLSearchParams(location.search);
+  const justAuthed = params.has("welcome");
+
   try {
     const data = await api("/api/me");
     me = data.user;
-    showPanel();
   } catch (err) {
-    if (err.message === "unauthenticated") return; // entrance already shown
-    showOffline(location.protocol === "file:");
+    if (err.message === "unauthenticated") return; // entrance already shown, ENTER → sign in
+    return showOffline(location.protocol === "file:");
+  }
+
+  if (justAuthed) {
+    // fresh from Discord sign-in: skip the entrance this once and land where
+    // they were originally headed
+    let target = location.hash || "#/";
+    try {
+      const saved = sessionStorage.getItem("afterLogin");
+      if (saved) { target = saved; sessionStorage.removeItem("afterLogin"); }
+    } catch {}
+    history.replaceState(null, "", location.pathname + target);
+    showPanel();
+  } else {
+    // signed in or not, the storm greets you — ENTER rolls into the panel
+    showEntrance();
   }
 })();
