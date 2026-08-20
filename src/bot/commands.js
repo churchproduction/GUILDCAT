@@ -151,6 +151,22 @@ export function buildDefinitions() {
       .setDescription("Look up a player's full moderation history")
       .addStringOption(userOption),
     new SlashCommandBuilder()
+      .setName("blacklist")
+      .setDescription("Block a Roblox user from sending in-game exploit reports")
+      .addSubcommand((s) =>
+        s
+          .setName("add")
+          .setDescription("Block them — their reports get silently dropped")
+          .addStringOption(userOption)
+          .addStringOption((o) => o.setName("reason").setDescription("Why (kept in the list)"))
+      )
+      .addSubcommand((s) =>
+        s.setName("remove").setDescription("Let them send reports again").addStringOption(userOption)
+      )
+      .addSubcommand((s) =>
+        s.setName("list").setDescription("Show everyone on the report blacklist")
+      ),
+    new SlashCommandBuilder()
       .setName("ticketpanel")
       .setDescription("Post the ticket panel(s) in this channel")
       .addStringOption((o) =>
@@ -565,6 +581,61 @@ export function buildHandlers({ queries, roblox, config, service, tickets }) {
           { name: "Record", value: dashboardLink(player.id) },
         ],
       }));
+    },
+
+    async blacklist(interaction) {
+      const sub = interaction.options.getSubcommand();
+
+      if (sub === "list") {
+        const rows = queries.listReportBlacklist();
+        const embed = new EmbedBuilder()
+          .setColor(COLORS.note)
+          .setAuthor({ name: "Report blacklist" })
+          .setDescription(
+            rows.length
+              ? rows.slice(0, 25).map((r) =>
+                  `**${r.username}** \`${r.user_id}\` — ${r.reason ?? "no reason"} · by ${r.added_by}`
+                ).join("\n") + (rows.length > 25 ? `\n…and ${rows.length - 25} more` : "")
+              : "Empty — nobody is blocked from reporting."
+          );
+        return interaction.editReply({ embeds: [embed] });
+      }
+
+      const query = interaction.options.getString("user", true);
+      const player = await resolveOrFail(interaction, query);
+      if (!player) return;
+
+      if (sub === "add") {
+        const reason = interaction.options.getString("reason") || null;
+        queries.blacklistReporter({
+          user_id: player.id,
+          username: player.name,
+          reason,
+          added_by: interaction.user.username,
+        });
+        return finish(interaction, actionEmbed({
+          type: "note",
+          player,
+          moderator: interaction.member,
+          fields: [
+            ...(reason ? [{ name: "Reason", value: reason }] : []),
+            {
+              name: "Report blacklist",
+              value:
+                "Added. Their in-game reports are now silently dropped — " +
+                "they still see \"thanks\", nothing reaches you. Undo with `/blacklist remove`.",
+            },
+          ],
+        }));
+      }
+
+      // remove
+      const removed = queries.unblacklistReporter(player.id);
+      return interaction.editReply({
+        content: removed
+          ? `**${player.name}** can send reports again.`
+          : `**${player.name}** wasn't on the blacklist.`,
+      });
     },
 
     async ticketpanel(interaction) {
