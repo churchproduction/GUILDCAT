@@ -22,9 +22,9 @@ const roblox = createRobloxClient(config.roblox);
 const audit = createAuditWebhooks(config);
 const service = createModerationService({ queries, roblox, config, audit });
 
-const { checkStaff } = await startBot({ config, queries, roblox, service });
+const { checkStaff, bridge } = await startBot({ config, queries, roblox, service });
 
-const app = createWebServer({ config, queries, roblox, service, checkStaff });
+const app = createWebServer({ config, queries, roblox, service, checkStaff, bridge, audit });
 app.listen(config.web.port, () => {
   console.log(`Web: dashboard on ${config.web.baseUrl} (port ${config.web.port})`);
 });

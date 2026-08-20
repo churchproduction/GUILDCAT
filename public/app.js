@@ -71,7 +71,7 @@ function fmtDur(seconds) {
 
 const LBL = {
   ban: "Ban", unban: "Unban", kick: "Kick", warn: "Warn",
-  note: "Note", dungeon: "Dungeon", release: "Release",
+  note: "Note", dungeon: "Dungeon", release: "Release", report: "Report",
 };
 const badge = (t, l) =>
   `<span class="badge b-${esc(t)}">${esc(l ?? LBL[t] ?? t)}</span>`;
@@ -483,6 +483,7 @@ async function renderOverview() {
     <div class="tile"><div class="label">In the dungeon</div><div class="value rune">${stats.activeDungeons}</div><div class="subv">${typeCount("dungeon")} sentences all-time</div></div>
     <div class="tile"><div class="label">Actions · 30 days</div><div class="value gold">${stats.actions30d}</div><div class="subv">${stats.totalActions} all-time</div></div>
     <div class="tile"><div class="label">Players on record</div><div class="value">${stats.playersTouched}</div><div class="subv">${typeCount("warn")} warnings · ${typeCount("kick")} kicks</div></div>
+    <div class="tile tile-link" onclick="location.hash='#/reports'"><div class="label">Open reports</div><div class="value ${stats.openReports > 0 ? "ember" : ""}">${stats.openReports ?? 0}</div><div class="subv">from in-game players</div></div>
   </div>
   <div class="card"><div class="chead"><h2>ACTIVITY</h2></div><div class="cbody">${activityChart(stats.byDay)}</div></div>
   <div class="card"><div class="chead"><h2>LATEST</h2><span class="grow"></span><a class="btn ghost sm" href="#/actions">View all →</a></div>
@@ -563,7 +564,7 @@ async function renderActions() {
   main.innerHTML = `
   ${head("The Ledger", "Every ban, dungeon, kick, warning, and note")}
   <div class="toolbar">
-    <div class="seg">${[["", "All"], ["ban", "Bans"], ["unban", "Unbans"], ["dungeon", "Dungeon"], ["release", "Releases"], ["kick", "Kicks"], ["warn", "Warns"], ["note", "Notes"]]
+    <div class="seg">${[["", "All"], ["ban", "Bans"], ["unban", "Unbans"], ["dungeon", "Dungeon"], ["release", "Releases"], ["kick", "Kicks"], ["warn", "Warns"], ["note", "Notes"], ["report", "Reports"]]
       .map(([val, label]) => `<button type="button" data-type="${val}" class="${val === actionsState.type ? "active" : ""}">${label}</button>`).join("")}</div>
     ${searchboxHtml("actionsFilter", "Filter by player, reason, or moderator")}
     <span class="count" id="actionsCount"></span>
@@ -669,19 +670,230 @@ async function renderUser(userId) {
   <div class="runeline"><span>ᛉ ᛟ ᚦ</span></div>
   ${actionBar}
   <div class="chips">
-    ${[["ban", "ban", "bans"], ["dungeon", "dungeon", "dungeons"], ["kick", "kick", "kicks"], ["warn", "warning", "warnings"], ["note", "note", "notes"]]
+    ${[["ban", "ban", "bans"], ["dungeon", "dungeon", "dungeons"], ["kick", "kick", "kicks"], ["warn", "warning", "warnings"], ["note", "note", "notes"], ["report", "report", "reports"]]
       .map(([t, one, many]) => `<span class="chip"><b>${countFor(t)}</b> ${countFor(t) === 1 ? one : many}</span>`).join("")}
   </div>
   <div class="card"><div class="chead"><h2>HISTORY</h2></div>${timeline}</div>`;
 }
 
+/* ── in-game reports ─────────────────────────────────────── */
+
+const joinUrl = (placeId, jobId) =>
+  placeId && jobId
+    ? `https://www.roblox.com/games/start?placeId=${encodeURIComponent(placeId)}&gameInstanceId=${encodeURIComponent(jobId)}`
+    : null;
+
+const reportsState = { status: "open", q: "", page: 1 };
+
+async function renderReports() {
+  document.title = "Warden — reports";
+  main.innerHTML = `
+  ${head("In-game Reports", "What players reported from inside the game")}
+  <div class="toolbar">
+    <div class="seg">${[["open", "Open"], ["handled", "Handled"], ["all", "All"]]
+      .map(([v, l]) => `<button type="button" data-status="${v}" class="${v === reportsState.status ? "active" : ""}">${l}</button>`).join("")}</div>
+    ${searchboxHtml("reportsFilter", "Filter by player or reason")}
+    <span class="count" id="reportsCount"></span>
+  </div>
+  <div class="card" id="reportsCard"><div class="loading">Loading…</div></div>`;
+
+  main.querySelectorAll("[data-status]").forEach((b) =>
+    b.addEventListener("click", () => { reportsState.status = b.dataset.status; reportsState.page = 1; renderReports(); }));
+  const filter = document.getElementById("reportsFilter");
+  filter.value = reportsState.q;
+  filter.addEventListener("input", debounce((e) => {
+    reportsState.q = e.target.value.trim(); reportsState.page = 1; load();
+  }, 300));
+
+  await load();
+
+  async function load() {
+    const data = await api(`/api/reports?status=${reportsState.status}&q=${encodeURIComponent(reportsState.q)}&page=${reportsState.page}`);
+    $("#reportsCount").textContent = `${data.total} report${data.total === 1 ? "" : "s"}`;
+    const el = $("#reportsCard");
+    if (!data.rows.length) {
+      el.innerHTML = `<div class="empty">No ${reportsState.status === "all" ? "" : reportsState.status + " "}reports${reportsState.q ? " matching that filter" : ""}.</div>`;
+      return;
+    }
+    el.innerHTML = `<div class="list">${data.rows.map((r) => {
+      const join = joinUrl(r.place_id, r.job_id);
+      const target = pcell({
+        user_id: r.target_user_id,
+        username: r.target_name,
+        current_username: r.target_current_name,
+        avatar_url: r.target_avatar_url,
+      });
+      const status = r.status === "open"
+        ? badge("ban", "Open")
+        : badge("neutral", "Handled") + `<div class="when" style="margin-top:4px">by ${esc(r.handled_by || "?")}</div>`;
+      return `<div class="row g-report">
+        <div>${target}</div>
+        <div><span class="reason">${esc(r.reason)}</span>
+          <div class="when" style="margin-top:4px">reported by ${esc(r.reporter_name)}</div></div>
+        <div class="bydim"><div class="when" title="${esc(fmtDate(r.created_at))}">${rel(r.created_at)}</div></div>
+        <div>${status}</div>
+        <div class="rowactions" style="display:flex;gap:7px;justify-content:flex-end">
+          ${join ? `<a class="btn sm primary" href="${esc(join)}" target="_blank" rel="noopener">Join server</a>` : ""}
+          ${r.status === "open" ? `<button class="btn ghost sm" data-handled="${r.id}">Handled ✓</button>` : ""}
+        </div>
+      </div>`;
+    }).join("")}</div>${pagerHtml(data)}`;
+    wirePager(el, (p) => { reportsState.page = p; load(); });
+    el.querySelectorAll("[data-handled]").forEach((b) =>
+      b.addEventListener("click", async () => {
+        b.disabled = true;
+        try {
+          await send("POST", `/api/mod/reports/${b.dataset.handled}/handled`);
+          toast("Marked handled");
+          load();
+        } catch (err) { toast(err.message, true); b.disabled = false; }
+      }));
+  }
+}
+
+/* ── tickets ─────────────────────────────────────────────── */
+
+const ticketsState = { status: "open", page: 1 };
+const KIND_LBL = { report: "User report", support: "Support" };
+
+async function renderTickets() {
+  document.title = "Warden — tickets";
+  main.innerHTML = `
+  ${head("Tickets", "Discord tickets, mirrored live")}
+  <div class="toolbar">
+    <div class="seg">${[["open", "Open"], ["closed", "Closed"], ["all", "All"]]
+      .map(([v, l]) => `<button type="button" data-status="${v}" class="${v === ticketsState.status ? "active" : ""}">${l}</button>`).join("")}</div>
+    <span class="count" id="ticketsCount"></span>
+  </div>
+  <div class="card" id="ticketsCard"><div class="loading">Loading…</div></div>`;
+
+  main.querySelectorAll("[data-status]").forEach((b) =>
+    b.addEventListener("click", () => { ticketsState.status = b.dataset.status; ticketsState.page = 1; renderTickets(); }));
+
+  await load();
+
+  async function load() {
+    const data = await api(`/api/tickets?status=${ticketsState.status}&page=${ticketsState.page}`);
+    $("#ticketsCount").textContent = `${data.total} ticket${data.total === 1 ? "" : "s"}`;
+    const el = $("#ticketsCard");
+    if (!data.rows.length) {
+      el.innerHTML = `<div class="empty">No ${ticketsState.status === "all" ? "" : ticketsState.status + " "}tickets. Post the panel in Discord with /ticketpanel.</div>`;
+      return;
+    }
+    el.innerHTML = `<div class="list">${data.rows.map((t) => `
+      <a class="row g-ticket rowlink" href="#/ticket/${t.id}">
+        <div>${badge(t.kind === "report" ? "ban" : "note", KIND_LBL[t.kind])}</div>
+        <div><span class="n1">#${t.id} · ${esc(t.subject || "(no subject)")}</span>
+          <div class="when" style="margin-top:4px">opened by ${esc(t.opener_tag)}</div></div>
+        <div class="bydim">${t.message_count} message${t.message_count === 1 ? "" : "s"}
+          <div class="when">${rel(t.last_message_at || t.created_at)}</div></div>
+        <div>${t.status === "open" ? badge("unban", "Open") : badge("neutral", "Closed")}</div>
+      </a>`).join("")}</div>${pagerHtml(data)}`;
+    wirePager(el, (p) => { ticketsState.page = p; load(); });
+  }
+}
+
+let ticketPoll = null;
+
+async function renderTicket(id) {
+  document.title = `Warden — ticket #${id}`;
+  main.innerHTML = `<div class="loading">Loading…</div>`;
+  let data;
+  try {
+    data = await api(`/api/tickets/${id}`);
+  } catch (err) {
+    if (err.message === "unauthenticated") return;
+    main.innerHTML = `${head("Ticket")}<div class="card"><div class="empty">${esc(err.message)}</div></div>`;
+    return;
+  }
+  const t = data.ticket;
+  const open = t.status === "open";
+
+  const msgHtml = (m) => {
+    const atts = (m.attachments || []).map((a) =>
+      `<a class="evlink" href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.name || "attachment")} ↗</a>`).join(" ");
+    return `<div class="tmsg ${m.via}">
+      <div class="tmeta"><b>${esc(m.author_name)}</b>
+        ${m.via === "web" ? '<span class="viachip">dashboard</span>' : m.via === "system" ? '<span class="viachip sys">system</span>' : ""}
+        <span class="when" title="${esc(fmtDate(m.created_at))}">${rel(m.created_at)}</span></div>
+      ${m.content ? `<div class="tbody">${esc(m.content)}</div>` : ""}
+      ${atts ? `<div style="margin-top:5px">${atts}</div>` : ""}
+    </div>`;
+  };
+
+  main.innerHTML = `
+  ${head(`${KIND_LBL[t.kind]} #${t.id}`, t.subject || "")}
+  <div class="toolbar">
+    ${t.status === "open" ? badge("unban", "Open") : badge("neutral", "Closed")}
+    <span class="bydim">opened by <b>${esc(t.opener_tag)}</b> · ${rel(t.created_at)}</span>
+    <span class="grow"></span>
+    ${open && t.kind === "support" ? `<button class="btn danger sm" id="closeTicketBtn">Close ticket</button>` : ""}
+    ${open && t.kind === "report" ? `<span class="bydim">closes in Discord: <code>/close</code> + reporter + player + evidence</span>` : ""}
+    ${!open && t.close_action_id ? `<a class="btn ghost sm" href="#/actions">Filed entry #${t.close_action_id}</a>` : ""}
+  </div>
+  <div class="card">
+    <div class="thread" id="thread">${data.messages.map(msgHtml).join("") || `<div class="empty">No messages yet.</div>`}</div>
+    ${open ? `
+    <div class="replybar">
+      <input id="replyText" type="text" maxlength="1800" placeholder="Reply as the bot — shows in the Discord channel"
+        autocomplete="off">
+      <button class="btn primary" id="replySend">Send</button>
+    </div>` : ""}
+  </div>`;
+
+  const refresh = async () => {
+    try {
+      const fresh = await api(`/api/tickets/${id}`);
+      const el = document.getElementById("thread");
+      if (el) el.innerHTML = fresh.messages.map(msgHtml).join("") || `<div class="empty">No messages yet.</div>`;
+      if (fresh.ticket.status !== t.status) renderTicket(id); // closed while viewing
+    } catch {}
+  };
+  clearInterval(ticketPoll);
+  if (open) ticketPoll = setInterval(refresh, 6000);
+
+  document.getElementById("replySend")?.addEventListener("click", async () => {
+    const input = document.getElementById("replyText");
+    const text = input.value.trim();
+    if (!text) return;
+    input.disabled = true;
+    try {
+      await send("POST", `/api/mod/tickets/${id}/reply`, { text });
+      input.value = "";
+      await refresh();
+    } catch (err) { toast(err.message, true); }
+    input.disabled = false;
+    input.focus();
+  });
+  document.getElementById("replyText")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") document.getElementById("replySend").click();
+  });
+  document.getElementById("closeTicketBtn")?.addEventListener("click", async () => {
+    if (!confirm("Close this support ticket? The Discord channel will be deleted (transcript stays here).")) return;
+    try {
+      await send("POST", `/api/mod/tickets/${id}/close`);
+      toast("Ticket closed");
+      renderTicket(id);
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
 /* ── router / boot ───────────────────────────────────────── */
 
-const NAV = [["#/", "overview", "Overview"], ["#/bans", "bans", "Bans"], ["#/dungeon", "dungeon", "Dungeon"], ["#/actions", "actions", "The Ledger"]];
+const NAV = [
+  ["#/", "overview", "Overview"],
+  ["#/bans", "bans", "Bans"],
+  ["#/dungeon", "dungeon", "Dungeon"],
+  ["#/reports", "reports", "Reports"],
+  ["#/tickets", "tickets", "Tickets"],
+  ["#/actions", "actions", "The Ledger"],
+];
 const ICONS = {
   overview: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="2"/><rect x="14" y="3" width="7" height="5" rx="2"/><rect x="14" y="12" width="7" height="9" rx="2"/><rect x="3" y="16" width="7" height="5" rx="2"/></svg>',
   bans: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="m5.8 5.8 12.4 12.4"/></svg>',
   dungeon: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 21V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v15"/><path d="M2 21h20"/><path d="M9 21v-4m6 4v-4M8 9h.01M12 9h.01M16 9h.01"/></svg>',
+  reports: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2 3 6v6c0 5 3.8 8.6 9 10 5.2-1.4 9-5 9-10V6z"/><path d="M12 8v4m0 4h.01"/></svg>',
+  tickets: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
   actions: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h16M4 18h10"/></svg>',
 };
 
@@ -696,10 +908,15 @@ async function route() {
   if (!me) return;
   const hash = location.hash.replace(/^#/, "") || "/";
   const userMatch = hash.match(/^\/user\/(\d+)$/);
+  const ticketMatch = hash.match(/^\/ticket\/(\d+)$/);
+  clearInterval(ticketPoll);
   try {
     if (userMatch) { setNav(""); await renderUser(userMatch[1]); }
+    else if (ticketMatch) { setNav("tickets"); await renderTicket(ticketMatch[1]); }
     else if (hash === "/bans") { setNav("bans"); await renderBans(); }
     else if (hash === "/dungeon") { setNav("dungeon"); await renderDungeon(); }
+    else if (hash === "/reports") { setNav("reports"); await renderReports(); }
+    else if (hash === "/tickets") { setNav("tickets"); await renderTickets(); }
     else if (hash === "/actions") { setNav("actions"); await renderActions(); }
     else { setNav("overview"); await renderOverview(); }
   } catch (err) {

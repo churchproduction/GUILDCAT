@@ -89,4 +89,11 @@ export const ACTION_LABELS = {
   note: "Note",
   dungeon: "Dungeon",
   release: "Release",
+  report: "Player report",
 };
+
+/** Web link that joins a specific Roblox server. */
+export function joinServerUrl(placeId, jobId) {
+  if (!placeId || !jobId) return null;
+  return `https://www.roblox.com/games/start?placeId=${encodeURIComponent(placeId)}&gameInstanceId=${encodeURIComponent(jobId)}`;
+}

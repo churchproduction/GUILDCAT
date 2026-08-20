@@ -63,7 +63,7 @@ const migPath = path.join(tmp, "migrate.db");
 }
 const migDb = openDb(migPath);
 const migQ = makeQueries(migDb);
-assert.equal(migDb.pragma("user_version", { simple: true }), 2);
+assert.equal(migDb.pragma("user_version", { simple: true }), 3);
 assert.equal(migQ.userHistory(42).length, 1); // legacy data survived
 migQ.recordAction({
   type: "dungeon", user_id: 42, username: "OldTimer", reason: "post-migration",
@@ -71,8 +71,14 @@ migQ.recordAction({
   moderator_id: "m1", moderator_name: "modA",
 });
 assert.equal(migQ.currentDungeon(42).active, true);
+migQ.recordAction({
+  type: "report", user_id: 42, username: "OldTimer",
+  reason: "Player report — reporter: someone (1). works after migration",
+  moderator_id: "m1", moderator_name: "modA",
+});
+assert.equal(migQ.userHistory(42)[0].type, "report");
 migDb.close();
-ok("v1 schema upgraded in place, old rows intact, dungeon type accepted");
+ok("v1 schema upgraded in place, old rows intact, dungeon + report types accepted");
 
 /* ── database ───────────────────────────────────────────── */
 console.log("database");
@@ -197,6 +203,7 @@ const config = {
   discord: { clientId: "c", clientSecret: "s", guildId: "g", modRoleIds: ["r"], seniorRoleIds: [], logChannelId: null },
   web: { sessionSecret: SECRET, baseUrl: "http://localhost:0", port: 0 },
   evidence: { dir: evidenceDir, maxMb: 25 },
+  game: { reportSecret: "game-secret" },
 };
 const robloxStub = {
   resolveUser: async (query) => {
@@ -234,9 +241,20 @@ const checkStaffStub = async (id) =>
   : id === "mod1" ? { id, username: "modTester", senior: false }
   : id === "1" ? { id, username: "tester", senior: false }
   : null;
+const bridgeCalls = [];
+const bridgeStub = {
+  postGameReport: async (report) => bridgeCalls.push(["gameReport", report.id]),
+  sendTicketReply: async (ticket, staff, text) => bridgeCalls.push(["reply", ticket.id, text]),
+  webCloseSupport: async (ticket, staff) => {
+    q.closeTicket(ticket.id, { closedBy: staff.id });
+    bridgeCalls.push(["close", ticket.id]);
+  },
+};
 const app = createWebServer({
   config, queries: q, roblox: robloxStub, service,
   checkStaff: checkStaffStub,
+  bridge: bridgeStub,
+  audit: (source, event) => auditEvents.push({ source, ...event }),
 });
 
 const server = app.listen(0);
@@ -390,6 +408,131 @@ assert.ok(auditEvents.some((e) => e.source === "web" && e.type === "dungeon"));
 assert.ok(auditEvents.some((e) => e.source === "web" && e.type === "delete" && e.deleted?.type === "dungeon"));
 assert.ok(auditEvents.every((e) => e.moderator?.name));
 ok("audit events fired with web source and details");
+
+/* ── in-game reports ────────────────────────────────────── */
+console.log("in-game reports");
+
+res = await fetch(`${base}/api/game/report`, {
+  method: "POST", headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ reporter: { id: 1 }, target: { id: 2 }, reason: "flying around" }),
+});
+assert.equal(res.status, 401);
+ok("game report without the secret → 401");
+
+res = await fetch(`${base}/api/game/report`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json", "x-warden-key": "game-secret" },
+  body: JSON.stringify({ reporter: { id: 1 }, target: { id: 2 }, reason: "x" }),
+});
+assert.equal(res.status, 400);
+ok("game report with a junk reason → 400");
+
+res = await fetch(`${base}/api/game/report`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json", "x-warden-key": "game-secret" },
+  body: JSON.stringify({
+    reporter: { id: 555, name: "GoodGuy" },
+    target: { id: 666, name: "BadGuy" },
+    reason: "killing through walls",
+    placeId: "123", jobId: "abc-def",
+  }),
+});
+assert.equal(res.status, 200);
+const gameReport = await res.json();
+assert.ok(gameReport.id > 0);
+await new Promise((r) => setTimeout(r, 50)); // let the fire-and-forget bridge run
+assert.ok(bridgeCalls.some(([kind, id]) => kind === "gameReport" && id === gameReport.id));
+ok("game report accepted and relayed to Discord");
+
+res = await fetch(`${base}/api/reports?status=open`, { headers: authedHeaders });
+const openReports = await res.json();
+assert.equal(openReports.total, 1);
+assert.equal(openReports.rows[0].target_name, "BadGuy");
+assert.equal(openReports.rows[0].job_id, "abc-def");
+ok("reports list shows the open report");
+
+res = await fetch(`${base}/api/mod/reports/${gameReport.id}/handled`, {
+  method: "POST", headers: modHeaders,
+});
+assert.equal(res.status, 200);
+assert.equal(q.getReport(gameReport.id).status, "handled");
+assert.ok(auditEvents.some((e) => e.type === "report_handled" && e.source === "web"));
+ok("mod can mark a report handled (audited)");
+
+/* ── tickets ────────────────────────────────────────────── */
+console.log("tickets");
+
+const supportId = q.createTicket({
+  kind: "support", channel_id: "chan-1", opener_id: "u9", opener_tag: "player9",
+  subject: "Lost my stuff", details: "I lost my kit after a crash",
+});
+q.addTicketMessage({
+  ticket_id: supportId, author_id: "u9", author_name: "player9", content: "I lost my kit after a crash",
+});
+const reportTicketId = q.createTicket({
+  kind: "report", channel_id: "chan-2", opener_id: "u10", opener_tag: "player10",
+  subject: "BadGuy", details: "he was flying",
+});
+
+res = await fetch(`${base}/api/tickets?status=open`, { headers: authedHeaders });
+assert.equal((await res.json()).total, 2);
+ok("tickets list");
+
+res = await fetch(`${base}/api/tickets/${supportId}`, { headers: authedHeaders });
+let thread = await res.json();
+assert.equal(thread.ticket.kind, "support");
+assert.equal(thread.messages.length, 1);
+ok("ticket thread endpoint");
+
+res = await fetch(`${base}/api/mod/tickets/${supportId}/reply`, {
+  method: "POST", headers: modHeaders,
+  body: JSON.stringify({ text: "We got you — checking now." }),
+});
+assert.equal(res.status, 200);
+assert.ok(bridgeCalls.some(([k, id, text]) => k === "reply" && id === supportId && text.includes("got you")));
+res = await fetch(`${base}/api/tickets/${supportId}`, { headers: authedHeaders });
+thread = await res.json();
+assert.equal(thread.messages.length, 2);
+assert.equal(thread.messages[1].via, "web");
+ok("web reply reaches Discord and lands in the transcript");
+
+// report tickets can NOT be closed from the web
+res = await fetch(`${base}/api/mod/tickets/${reportTicketId}/close`, {
+  method: "POST", headers: modHeaders,
+});
+assert.equal(res.status, 409);
+ok("report ticket refuses web close (must use /close in Discord)");
+
+// support tickets can
+res = await fetch(`${base}/api/mod/tickets/${supportId}/close`, {
+  method: "POST", headers: modHeaders,
+});
+assert.equal(res.status, 200);
+assert.equal(q.getTicket(supportId).status, "closed");
+assert.ok(auditEvents.some((e) => e.type === "ticket_close"));
+ok("support ticket closes from the web (audited)");
+
+// replying to a closed ticket is refused
+res = await fetch(`${base}/api/mod/tickets/${supportId}/reply`, {
+  method: "POST", headers: modHeaders,
+  body: JSON.stringify({ text: "too late" }),
+});
+assert.equal(res.status, 409);
+ok("no replies on closed tickets");
+
+// closing a report ticket the right way: service.report files the record entry
+const reported = { id: 666, name: "BadGuy", displayName: "Bad Guy" };
+const { actionId: reportActionId } = service.report(reported, {
+  reason: `Player report (ticket #${reportTicketId}) — reporter: player10 (u10). Outcome: dungeoned`,
+  moderator: { id: "mod1", name: "modTester", via: "discord" },
+});
+q.closeTicket(reportTicketId, { closedBy: "mod1", closeActionId: reportActionId });
+assert.equal(q.getTicket(reportTicketId).close_action_id, reportActionId);
+assert.equal(q.userHistory(666)[0].type, "report");
+res = await fetch(`${base}/api/actions?type=report`, { headers: authedHeaders });
+assert.ok((await res.json()).total >= 1);
+assert.ok(auditEvents.some((e) => e.type === "report" && e.player?.id === 666));
+ok("closing a report ticket files a report entry on the player");
 
 server.close();
 fs.rmSync(tmp, { recursive: true, force: true });

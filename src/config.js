@@ -44,6 +44,11 @@ export const config = {
     modRoleIds: idList("MOD_ROLE_IDS"),
     seniorRoleIds: idList("SENIOR_ROLE_IDS"),
     logChannelId: env("LOG_CHANNEL_ID", null),
+    reportChannelId: env("REPORT_CHANNEL_ID", null),     // in-game exploit reports land here
+    ticketCategoryId: env("TICKET_CATEGORY_ID", null),   // ticket channels are created under this category
+  },
+  game: {
+    reportSecret: env("GAME_REPORT_SECRET", null),       // shared secret the game script sends
   },
   roblox: {
     apiKey: env("ROBLOX_API_KEY"),
@@ -98,6 +103,16 @@ export function configWarnings() {
   if (config.discord.seniorRoleIds.length === 0) {
     warnings.push(
       "SENIOR_ROLE_IDS is empty — only server administrators will be able to /ban and /unban."
+    );
+  }
+  if (!config.discord.reportChannelId) {
+    warnings.push(
+      "REPORT_CHANNEL_ID is not set — in-game exploit reports will only show on the dashboard, not in Discord."
+    );
+  }
+  if (!config.game.reportSecret) {
+    warnings.push(
+      "GAME_REPORT_SECRET is not set — the in-game report endpoint is disabled until you set one."
     );
   }
   return warnings;

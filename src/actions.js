@@ -163,6 +163,23 @@ export function createModerationService({ queries, roblox, config, audit }) {
       return { actionId };
     },
 
+    /** File a player report on the record (used when a report ticket closes). */
+    report(player, { reason, moderator }) {
+      const actionId = queries.recordAction(
+        {
+          type: "report",
+          user_id: player.id,
+          username: player.name,
+          reason,
+          moderator_id: moderator.id,
+          moderator_name: moderator.name,
+        },
+        player
+      );
+      emit(moderator, { type: "report", player, reason });
+      return { actionId };
+    },
+
     note(player, { text, moderator }) {
       const actionId = queries.recordAction(
         {

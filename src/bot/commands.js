@@ -22,11 +22,13 @@ const COLORS = {
   note: 0x6b7a8f,
   dungeon: 0x9085e9,
   release: 0x3f9e6e,
+  report: 0xd64550,
   audit: 0x5865f2,
   error: 0x99332e,
 };
 
-const SENIOR_ONLY = new Set(["ban", "unban"]);
+const SENIOR_ONLY = new Set(["ban", "unban", "ticketpanel"]);
+const EPHEMERAL_DEFER = new Set(["ticketpanel"]);
 
 const EVIDENCE_EXTENSIONS = new Set([
   ".png", ".jpg", ".jpeg", ".gif", ".webp",
@@ -148,10 +150,31 @@ export function buildDefinitions() {
       .setName("audit")
       .setDescription("Look up a player's full moderation history")
       .addStringOption(userOption),
+    new SlashCommandBuilder()
+      .setName("ticketpanel")
+      .setDescription("Post the ticket panel (User Report / Support Ticket buttons) in this channel"),
+    new SlashCommandBuilder()
+      .setName("close")
+      .setDescription("Close this ticket. Report tickets need reporter + player (+ evidence).")
+      .addUserOption((o) =>
+        o.setName("reporter").setDescription("Report tickets: the Discord user who reported")
+      )
+      .addStringOption((o) =>
+        o.setName("player").setDescription("Report tickets: Roblox username of the reported player")
+      )
+      .addAttachmentOption((o) =>
+        o.setName("evidence").setDescription("Image or video evidence")
+      )
+      .addStringOption((o) =>
+        o.setName("evidence_link").setDescription("Link to video evidence")
+      )
+      .addStringOption((o) =>
+        o.setName("notes").setDescription("What was found / decided")
+      ),
   ].map((c) => c.setDefaultMemberPermissions(PermissionFlagsBits.KickMembers).toJSON());
 }
 
-export function buildHandlers({ queries, roblox, config, service }) {
+export function buildHandlers({ queries, roblox, config, service, tickets }) {
   const hasAnyRole = (member, roleIds) => {
     const roles = member?.roles?.cache;
     return roleIds.some((id) => roles?.has?.(id));
@@ -528,6 +551,100 @@ export function buildHandlers({ queries, roblox, config, service }) {
       }));
     },
 
+    async ticketpanel(interaction) {
+      await tickets.postPanel(interaction.channel);
+      await interaction.editReply({ content: "Ticket panel posted." });
+    },
+
+    async close(interaction) {
+      const ticket = queries.ticketByChannel(interaction.channelId);
+      if (!ticket) {
+        return interaction.editReply({
+          content: "This isn't a ticket channel — run /close inside the ticket you want to close.",
+        });
+      }
+      if (ticket.status !== "open") {
+        return interaction.editReply({ content: "This ticket is already closed." });
+      }
+
+      const closedBy = {
+        id: interaction.user.id,
+        name: interaction.user.username,
+        mention: `<@${interaction.user.id}>`,
+        via: "discord",
+      };
+
+      if (ticket.kind === "support") {
+        await tickets.finalizeClose({ ticket, closedBy });
+        return interaction.editReply({ content: "Support ticket closed." });
+      }
+
+      // User-report ticket: the close IS the paperwork.
+      const reporter = interaction.options.getUser("reporter");
+      const playerQuery = interaction.options.getString("player");
+      const attachment = interaction.options.getAttachment("evidence");
+      const link = interaction.options.getString("evidence_link");
+      const notes = interaction.options.getString("notes");
+
+      const missing = [];
+      if (!reporter) missing.push("`reporter` — the Discord user who reported");
+      if (!playerQuery) missing.push("`player` — the reported player's Roblox username");
+      if (missing.length) {
+        return interaction.editReply({
+          content:
+            "Report tickets can only be closed with the details filled in. Missing:\n" +
+            missing.map((m) => `• ${m}`).join("\n") +
+            "\nAdd `evidence` (or `evidence_link`) too if you have it.",
+        });
+      }
+
+      const player = await resolveOrFail(interaction, playerQuery);
+      if (!player) return;
+
+      const reasonParts = [
+        `Player report (ticket #${ticket.id}) — reporter: ${reporter.username} (${reporter.id}).`,
+        `Reported in ticket: "${ticket.subject ?? "?"}"`,
+      ];
+      if (notes) reasonParts.push(`Outcome: ${notes}`);
+      const { actionId } = service.report(player, {
+        reason: reasonParts.join(" "),
+        moderator: moderatorOf(interaction),
+      });
+      const ev = await collectEvidence(actionId, {
+        attachment,
+        link,
+        uploadedBy: interaction.user.id,
+      });
+
+      await tickets.finalizeClose({
+        ticket,
+        closedBy,
+        closeActionId: actionId,
+        fields: [
+          { name: "Reporter", value: `<@${reporter.id}>`, inline: true },
+          { name: "Reported player", value: playerLine(player), inline: true },
+          ...(notes ? [{ name: "Outcome", value: notes }] : []),
+          ...evidenceFields(ev),
+        ],
+      });
+
+      await interaction.editReply({
+        embeds: [
+          actionEmbed({
+            type: "report",
+            player,
+            moderator: interaction.member,
+            fields: [
+              { name: "Reporter", value: `<@${reporter.id}> (${reporter.id})`, inline: true },
+              ...(notes ? [{ name: "Outcome", value: notes }] : []),
+              ...evidenceFields(ev),
+              { name: "Filed on record", value: dashboardLink(player.id) },
+            ],
+          }),
+        ],
+      });
+    },
+
     async audit(interaction) {
       const query = interaction.options.getString("user", true);
       const player = await resolveOrFail(interaction, query);
@@ -630,7 +747,11 @@ export function buildHandlers({ queries, roblox, config, service }) {
         });
       }
 
-      await interaction.deferReply();
+      await interaction.deferReply(
+        EPHEMERAL_DEFER.has(interaction.commandName)
+          ? { flags: MessageFlags.Ephemeral }
+          : {}
+      );
       try {
         await handler(interaction);
       } catch (err) {

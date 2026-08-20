@@ -11,6 +11,7 @@ const COLORS = {
   note: 0x6b7a8f,
   dungeon: 0x9085e9,
   release: 0x3f9e6e,
+  report: 0xd64550,
   delete: 0x99332e,
 };
 
@@ -30,7 +31,26 @@ export function createAuditWebhooks(config) {
       footer: { text: source === "web" ? "via the website" : "via Discord" },
     };
 
-    if (event.type === "delete") {
+    if (event.type === "ticket_close") {
+      embed.author = { name: "Ticket closed" };
+      embed.description =
+        `**${event.ticket?.kind === "report" ? "User report" : "Support ticket"} #${event.ticket?.id}** — ` +
+        `opened by ${event.ticket?.opener_tag ?? "?"}`;
+      embed.fields = [
+        { name: "Closed by", value: `${event.moderator.name} (<@${event.moderator.id}>)`, inline: true },
+      ];
+    } else if (event.type === "report_handled") {
+      embed.author = { name: "In-game report handled" };
+      embed.description =
+        `**${event.report?.reporter_name}** reported ` +
+        `[${event.report?.target_name}](https://www.roblox.com/users/${event.report?.target_user_id}/profile) — marked handled.`;
+      embed.fields = [
+        ...(event.report?.reason
+          ? [{ name: "Report", value: String(event.report.reason).slice(0, 900) }]
+          : []),
+        { name: "Handled by", value: `${event.moderator.name} (<@${event.moderator.id}>)`, inline: true },
+      ];
+    } else if (event.type === "delete") {
       embed.author = { name: "Log entry deleted" };
       embed.description =
         `**${ACTION_LABELS[event.deleted?.type] ?? event.deleted?.type ?? "entry"}** on ` +

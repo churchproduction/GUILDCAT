@@ -102,6 +102,7 @@ const config = {
   discord: { clientId: "c", clientSecret: "s", guildId: "g", modRoleIds: ["r"], seniorRoleIds: ["s"], logChannelId: null },
   web: { sessionSecret: SECRET, baseUrl: "http://localhost:4455", port: 4455 },
   evidence: { dir: evidenceDir, maxMb: 25 },
+  game: { reportSecret: "preview" },
 };
 const robloxStub = {
   // any name/id resolves so the action buttons work in the preview
@@ -131,9 +132,45 @@ const robloxStub = {
 };
 const service = createModerationService({ queries: q, roblox: robloxStub, config });
 const previewStaff = { id: "1", username: "preview", displayName: "Preview mode", senior: true };
+
+/* sample in-game reports + tickets so the new pages have something to show */
+q.insertReport({
+  reporter_user_id: 12001, reporter_name: "honest_axel",
+  target_user_id: 101, target_name: "NoobSlayer99",
+  reason: "flying above the hill and killing through walls",
+  place_id: "10059809256", job_id: "preview-job-1234",
+});
+q.insertReport({
+  reporter_user_id: 12002, reporter_name: "shieldmaiden",
+  target_user_id: 404, target_name: "TentThief",
+  reason: "teleporting to everyone and stealing kills",
+  place_id: "10059809256", job_id: "preview-job-9999",
+});
+const previewSupport = q.createTicket({
+  kind: "support", channel_id: "prev-chan-1", opener_id: "u1", opener_tag: "lost_viking",
+  subject: "Lost my kit after a crash", details: "Server crashed mid-round and my kit is gone.",
+});
+q.addTicketMessage({ ticket_id: previewSupport, author_id: "u1", author_name: "lost_viking", content: "Server crashed mid-round and my kit is gone." });
+q.addTicketMessage({ ticket_id: previewSupport, author_id: "m1", author_name: "modA", content: "Checking the logs now." });
+const previewReport = q.createTicket({
+  kind: "report", channel_id: "prev-chan-2", opener_id: "u2", opener_tag: "watchful_owl",
+  subject: "NoobSlayer99", details: "He was speed-hacking in the ice race.",
+});
+q.addTicketMessage({ ticket_id: previewReport, author_id: "u2", author_name: "watchful_owl", content: "He was speed-hacking in the ice race. I have a clip." });
+
+const bridgeStub = {
+  postGameReport: async () => {},
+  sendTicketReply: async (ticket, staff, text) =>
+    q.addTicketMessage({
+      ticket_id: ticket.id, author_id: "bot", author_name: "(Discord copy)",
+      via: "discord", content: `[would appear in the ticket channel] ${text}`,
+    }),
+  webCloseSupport: async (ticket, staff) => q.closeTicket(ticket.id, { closedBy: staff.id }),
+};
 const app = createWebServer({
   config, queries: q, roblox: robloxStub, service,
   checkStaff: async () => previewStaff,
+  bridge: bridgeStub,
 });
 
 // Preview-only: skip Discord sign-in entirely. This route exists only here,

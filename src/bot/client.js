@@ -7,13 +7,29 @@ import {
   Events,
 } from "discord.js";
 import { buildDefinitions, buildHandlers } from "./commands.js";
+import { createTicketSystem } from "./tickets.js";
 
 export async function startBot({ config, queries, roblox, service }) {
   const client = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
+    intents: [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMembers,
+      // Ticket channels are mirrored to the dashboard, so the bot reads the
+      // messages in them. Needs "Message Content Intent" enabled in the
+      // Discord developer portal (Bot tab), same place as the members intent.
+      GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.MessageContent,
+    ],
   });
 
-  const { dispatch, isMod, isSenior } = buildHandlers({ queries, roblox, config, service });
+  const tickets = createTicketSystem({ client, config, queries });
+  const { dispatch, isMod, isSenior } = buildHandlers({
+    queries,
+    roblox,
+    config,
+    service,
+    tickets,
+  });
 
   client.once(Events.ClientReady, async (c) => {
     console.log(`Discord: logged in as ${c.user.tag}`);
@@ -30,15 +46,32 @@ export async function startBot({ config, queries, roblox, service }) {
   });
 
   client.on(Events.InteractionCreate, async (interaction) => {
-    if (!interaction.isChatInputCommand()) return;
     if (interaction.guildId !== config.discord.guildId) return;
-    await dispatch(interaction);
+    try {
+      if (interaction.isButton() || interaction.isModalSubmit()) {
+        await tickets.handleInteraction(interaction);
+        return;
+      }
+      if (interaction.isChatInputCommand()) await dispatch(interaction);
+    } catch (err) {
+      console.error("Interaction failed:", err);
+    }
   });
+
+  client.on(Events.MessageCreate, (message) => tickets.onMessage(message));
 
   await client.login(config.discord.token);
 
   return {
     client,
+
+    // The web server talks to Discord through this.
+    bridge: {
+      postGameReport: tickets.postGameReport,
+      sendTicketReply: tickets.sendTicketReply,
+      webCloseSupport: tickets.webCloseSupport,
+    },
+
     /**
      * Used by the web login: is this Discord user a moderator in the guild?
      * Returns the member's basic profile if yes, null if no.

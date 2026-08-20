@@ -14,14 +14,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { nowIso } from "./format.js";
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
-export const ACTION_TYPES = ["ban", "unban", "kick", "warn", "note", "dungeon", "release"];
+export const ACTION_TYPES = ["ban", "unban", "kick", "warn", "note", "dungeon", "release", "report"];
 
 const ACTIONS_TABLE_SQL = `
   CREATE TABLE actions (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    type             TEXT NOT NULL CHECK (type IN ('ban','unban','kick','warn','note','dungeon','release')),
+    type             TEXT NOT NULL CHECK (type IN ('ban','unban','kick','warn','note','dungeon','release','report')),
     user_id          INTEGER NOT NULL,
     username         TEXT NOT NULL,          -- snapshot at action time
     reason           TEXT,                   -- internal/private reason
@@ -76,6 +76,54 @@ const SUPPORT_TABLES_SQL = `
     created_at    TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_evidence_action ON evidence(action_id);
+
+  -- In-game exploit reports (submitted by players from inside the game).
+  CREATE TABLE IF NOT EXISTS reports (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    reporter_user_id INTEGER NOT NULL,
+    reporter_name    TEXT NOT NULL,
+    target_user_id   INTEGER NOT NULL,
+    target_name      TEXT NOT NULL,
+    reason           TEXT NOT NULL,
+    place_id         TEXT,
+    job_id           TEXT,        -- the server they were in → mods can join it
+    status           TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','handled')),
+    handled_by       TEXT,
+    handled_at       TEXT,
+    created_at       TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_reports_target ON reports(target_user_id, created_at DESC);
+
+  -- Discord tickets ('report' = user report, 'support' = support ticket).
+  CREATE TABLE IF NOT EXISTS tickets (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind            TEXT NOT NULL CHECK (kind IN ('report','support')),
+    channel_id      TEXT,
+    opener_id       TEXT NOT NULL,   -- Discord user id
+    opener_tag      TEXT NOT NULL,
+    subject         TEXT,            -- report: who; support: topic
+    details         TEXT,            -- what they wrote in the form
+    status          TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','closed')),
+    closed_by       TEXT,
+    closed_at       TEXT,
+    close_action_id INTEGER,         -- report tickets: the logged record entry
+    created_at      TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_tickets_channel ON tickets(channel_id);
+
+  CREATE TABLE IF NOT EXISTS ticket_messages (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id   INTEGER NOT NULL REFERENCES tickets(id),
+    author_id   TEXT NOT NULL,
+    author_name TEXT NOT NULL,
+    via         TEXT NOT NULL DEFAULT 'discord' CHECK (via IN ('discord','web','system')),
+    content     TEXT,
+    attachments TEXT,                -- JSON [{name,url}]
+    created_at  TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_ticket_messages ON ticket_messages(ticket_id, id);
 `;
 
 function migrate(db) {
@@ -90,8 +138,9 @@ function migrate(db) {
     return;
   }
 
-  if (!actionsRow.sql.includes("'dungeon'")) {
-    // v1 → v2: SQLite can't alter a CHECK constraint, so rebuild the table.
+  if (!actionsRow.sql.includes("'report'")) {
+    // Older schema (v1 or v2): SQLite can't alter a CHECK constraint, so
+    // rebuild the table with the full type list.
     // legacy_alter_table stops RENAME from rewriting other tables' foreign
     // keys (bans REFERENCES actions) to point at the temporary name.
     db.pragma("foreign_keys = OFF");
@@ -391,6 +440,97 @@ export function makeQueries(db) {
            ORDER BY p.updated_at DESC LIMIT @limit`
         )
         .all({ q: `%${q}%`, now: nowIso(), limit }),
+
+    /* ── in-game exploit reports ─────────────────────────── */
+
+    insertReport: (r) =>
+      Number(
+        db.prepare(`
+          INSERT INTO reports (reporter_user_id, reporter_name, target_user_id,
+            target_name, reason, place_id, job_id, created_at)
+          VALUES (@reporter_user_id, @reporter_name, @target_user_id,
+            @target_name, @reason, @place_id, @job_id, @created_at)
+        `).run({ place_id: null, job_id: null, ...r, created_at: nowIso() }).lastInsertRowid
+      ),
+
+    getReport: (id) => db.prepare(`SELECT * FROM reports WHERE id = ?`).get(id),
+
+    listReports: ({ status = "open", q = "", limit = 50, offset = 0 } = {}) => {
+      const statusClause = status === "all" ? `` : `AND r.status = @status`;
+      const search = q
+        ? `AND (r.reporter_name LIKE @q OR r.target_name LIKE @q OR r.reason LIKE @q
+               OR CAST(r.target_user_id AS TEXT) LIKE @q)`
+        : ``;
+      const params = { status, q: `%${q}%`, limit, offset };
+      const rows = db
+        .prepare(`SELECT r.*, p.avatar_url AS target_avatar_url,
+                    COALESCE(p.username, r.target_name) AS target_current_name
+                  FROM reports r LEFT JOIN players p ON p.user_id = r.target_user_id
+                  WHERE 1=1 ${statusClause} ${search}
+                  ORDER BY r.created_at DESC LIMIT @limit OFFSET @offset`)
+        .all(params);
+      const total = db
+        .prepare(`SELECT COUNT(*) AS n FROM reports r WHERE 1=1 ${statusClause} ${search}`)
+        .get(params).n;
+      return { rows, total };
+    },
+
+    setReportHandled: (id, handledBy) =>
+      db.prepare(`UPDATE reports SET status='handled', handled_by=?, handled_at=?
+                  WHERE id=? AND status='open'`).run(handledBy, nowIso(), id).changes > 0,
+
+    openReportCount: () =>
+      db.prepare(`SELECT COUNT(*) AS n FROM reports WHERE status='open'`).get().n,
+
+    /* ── Discord tickets ─────────────────────────────────── */
+
+    createTicket: (t) =>
+      Number(
+        db.prepare(`
+          INSERT INTO tickets (kind, channel_id, opener_id, opener_tag, subject, details, created_at)
+          VALUES (@kind, @channel_id, @opener_id, @opener_tag, @subject, @details, @created_at)
+        `).run({ subject: null, details: null, ...t, created_at: nowIso() }).lastInsertRowid
+      ),
+
+    getTicket: (id) => db.prepare(`SELECT * FROM tickets WHERE id = ?`).get(id),
+
+    ticketByChannel: (channelId) =>
+      db.prepare(`SELECT * FROM tickets WHERE channel_id = ? ORDER BY id DESC`).get(channelId),
+
+    closeTicket: (id, { closedBy, closeActionId = null } = {}) =>
+      db.prepare(`UPDATE tickets SET status='closed', closed_by=?, closed_at=?, close_action_id=?
+                  WHERE id=? AND status='open'`)
+        .run(closedBy ?? null, nowIso(), closeActionId, id).changes > 0,
+
+    listTickets: ({ status = "open", kind = "", limit = 50, offset = 0 } = {}) => {
+      const statusClause = status === "all" ? `` : `AND t.status = @status`;
+      const kindClause = kind ? `AND t.kind = @kind` : ``;
+      const params = { status, kind, limit, offset };
+      const rows = db
+        .prepare(`SELECT t.*,
+                    (SELECT COUNT(*) FROM ticket_messages m WHERE m.ticket_id = t.id) AS message_count,
+                    (SELECT MAX(m.created_at) FROM ticket_messages m WHERE m.ticket_id = t.id) AS last_message_at
+                  FROM tickets t WHERE 1=1 ${statusClause} ${kindClause}
+                  ORDER BY t.status = 'open' DESC, COALESCE(last_message_at, t.created_at) DESC
+                  LIMIT @limit OFFSET @offset`)
+        .all(params);
+      const total = db
+        .prepare(`SELECT COUNT(*) AS n FROM tickets t WHERE 1=1 ${statusClause} ${kindClause}`)
+        .get(params).n;
+      return { rows, total };
+    },
+
+    addTicketMessage: (m) =>
+      Number(
+        db.prepare(`
+          INSERT INTO ticket_messages (ticket_id, author_id, author_name, via, content, attachments, created_at)
+          VALUES (@ticket_id, @author_id, @author_name, @via, @content, @attachments, @created_at)
+        `).run({ via: "discord", content: null, attachments: null, ...m, created_at: nowIso() })
+          .lastInsertRowid
+      ),
+
+    ticketMessages: (ticketId) =>
+      db.prepare(`SELECT * FROM ticket_messages WHERE ticket_id = ? ORDER BY id`).all(ticketId),
 
     stats: () => {
       const now = nowIso();

@@ -11,7 +11,7 @@ const PUBLIC_DIR = path.join(__dirname, "..", "..", "public");
 
 const PAGE_SIZE = 25;
 
-export function createWebServer({ config, queries, roblox, service, checkStaff }) {
+export function createWebServer({ config, queries, roblox, service, checkStaff, bridge, audit }) {
   const app = express();
   app.set("trust proxy", 1); // Railway/Render sit behind a proxy
   app.use(express.json());
@@ -52,7 +52,41 @@ export function createWebServer({ config, queries, roblox, service, checkStaff }
   });
 
   app.get("/api/stats", requireAuth, (req, res) => {
-    res.json(queries.stats());
+    res.json({ ...queries.stats(), openReports: queries.openReportCount() });
+  });
+
+  /* ── in-game exploit reports (posted by the game server) ──
+     No session here — the game authenticates with a shared secret. */
+  app.post("/api/game/report", async (req, res) => {
+    if (!config.game.reportSecret) {
+      return res.status(503).json({ error: "GAME_REPORT_SECRET is not configured" });
+    }
+    if (req.get("x-warden-key") !== config.game.reportSecret) {
+      return res.status(401).json({ error: "bad key" });
+    }
+    const b = req.body ?? {};
+    const reporterId = parseInt(b.reporter?.id, 10);
+    const targetId = parseInt(b.target?.id, 10);
+    const reason = String(b.reason ?? "").trim().slice(0, 300);
+    if (!Number.isInteger(reporterId) || !Number.isInteger(targetId) || reason.length < 4) {
+      return res.status(400).json({ error: "reporter.id, target.id and a reason are required" });
+    }
+    const report = {
+      reporter_user_id: reporterId,
+      reporter_name: String(b.reporter?.name ?? reporterId).slice(0, 60),
+      target_user_id: targetId,
+      target_name: String(b.target?.name ?? targetId).slice(0, 60),
+      reason,
+      place_id: b.placeId ? String(b.placeId).slice(0, 30) : null,
+      job_id: b.jobId ? String(b.jobId).slice(0, 60) : null,
+    };
+    const id = queries.insertReport(report);
+    // Post to Discord (with the join-server button) without holding up the game.
+    (async () => {
+      const avatar = await roblox.getHeadshotUrl(targetId).catch(() => null);
+      await bridge?.postGameReport({ ...report, id, created_at: nowIso() }, avatar);
+    })().catch(() => {});
+    res.json({ ok: true, id });
   });
 
   const stateListRoute = (listFn) => (req, res) => {
@@ -72,9 +106,44 @@ export function createWebServer({ config, queries, roblox, service, checkStaff }
   app.get("/api/bans", requireAuth, stateListRoute(queries.listBans));
   app.get("/api/dungeon", requireAuth, stateListRoute(queries.listDungeons));
 
+  app.get("/api/reports", requireAuth, (req, res) => {
+    const { limit, offset, page } = pageParams(req);
+    const status = ["open", "handled", "all"].includes(req.query.status)
+      ? req.query.status
+      : "open";
+    const { rows, total } = queries.listReports({
+      status,
+      q: String(req.query.q ?? "").trim(),
+      limit,
+      offset,
+    });
+    res.json({ rows, total, page, pageSize: PAGE_SIZE });
+  });
+
+  app.get("/api/tickets", requireAuth, (req, res) => {
+    const { limit, offset, page } = pageParams(req);
+    const status = ["open", "closed", "all"].includes(req.query.status)
+      ? req.query.status
+      : "all";
+    const kind = ["report", "support"].includes(req.query.kind) ? req.query.kind : "";
+    const { rows, total } = queries.listTickets({ status, kind, limit, offset });
+    res.json({ rows, total, page, pageSize: PAGE_SIZE });
+  });
+
+  app.get("/api/tickets/:id", requireAuth, (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const ticket = Number.isInteger(id) ? queries.getTicket(id) : null;
+    if (!ticket) return res.status(404).json({ error: "no such ticket" });
+    const messages = queries.ticketMessages(id).map((m) => ({
+      ...m,
+      attachments: m.attachments ? JSON.parse(m.attachments) : [],
+    }));
+    res.json({ ticket, messages });
+  });
+
   app.get("/api/actions", requireAuth, (req, res) => {
     const { limit, offset, page } = pageParams(req);
-    const type = ["ban", "unban", "kick", "warn", "note", "dungeon", "release"].includes(req.query.type)
+    const type = ["ban", "unban", "kick", "warn", "note", "dungeon", "release", "report"].includes(req.query.type)
       ? req.query.type
       : "";
     const { rows, total } = queries.listActions({
@@ -307,6 +376,64 @@ export function createWebServer({ config, queries, roblox, service, checkStaff }
     const { actionId } = service.note(player, { text, moderator });
     return summary(player, actionId);
   }));
+
+  app.post("/api/mod/reports/:id/handled", requireStaff(false), (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const report = Number.isInteger(id) ? queries.getReport(id) : null;
+    if (!report) return res.status(404).json({ error: "no such report" });
+    if (report.status !== "open") return res.json({ ok: true }); // already done
+    queries.setReportHandled(id, req.staff.username);
+    audit?.("web", {
+      type: "report_handled",
+      report,
+      moderator: { id: req.staff.id, name: req.staff.username },
+    });
+    res.json({ ok: true });
+  });
+
+  app.post("/api/mod/tickets/:id/reply", requireStaff(false), async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const ticket = Number.isInteger(id) ? queries.getTicket(id) : null;
+    if (!ticket) return res.status(404).json({ error: "no such ticket" });
+    if (ticket.status !== "open") return res.status(409).json({ error: "ticket is closed" });
+    const text = String(req.body?.text ?? "").trim();
+    if (!text) return res.status(400).json({ error: "Write a message first" });
+    if (!bridge) return res.status(503).json({ error: "Discord bot is offline" });
+    try {
+      await bridge.sendTicketReply(ticket, req.staff, text.slice(0, 1800));
+    } catch (err) {
+      return res.status(502).json({ error: `Couldn't send to Discord: ${err.message}` });
+    }
+    queries.addTicketMessage({
+      ticket_id: ticket.id,
+      author_id: req.staff.id,
+      author_name: req.staff.displayName ?? req.staff.username,
+      via: "web",
+      content: text.slice(0, 1800),
+    });
+    res.json({ ok: true });
+  });
+
+  app.post("/api/mod/tickets/:id/close", requireStaff(false), async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const ticket = Number.isInteger(id) ? queries.getTicket(id) : null;
+    if (!ticket) return res.status(404).json({ error: "no such ticket" });
+    if (ticket.status !== "open") return res.json({ ok: true });
+    if (ticket.kind === "report") {
+      return res.status(409).json({
+        error:
+          "Report tickets close in Discord with /close — reporter + player + evidence — so the report gets filed on the record.",
+      });
+    }
+    if (!bridge) return res.status(503).json({ error: "Discord bot is offline" });
+    await bridge.webCloseSupport(ticket, req.staff);
+    audit?.("web", {
+      type: "ticket_close",
+      ticket,
+      moderator: { id: req.staff.id, name: req.staff.username },
+    });
+    res.json({ ok: true });
+  });
 
   app.delete("/api/mod/actions/:id", requireStaff(true), async (req, res) => {
     const id = parseInt(req.params.id, 10);

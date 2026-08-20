@@ -138,6 +138,27 @@ input::placeholder{color:var(--ink-3)}
 .row:hover{background:rgba(255,255,255,.022)}
 .g-feed{grid-template-columns:150px 205px 1fr 108px 40px}
 .g-state{grid-template-columns:205px 1fr 105px 135px 105px}
+.g-report{grid-template-columns:205px 1fr 92px 110px 200px}
+.g-ticket{grid-template-columns:120px 1fr 130px 90px}
+.rowlink{text-decoration:none;color:inherit;cursor:pointer}
+.rowlink .n1{color:var(--ink-1);font-weight:600}
+
+/* ticket thread */
+.thread{padding:6px 20px 14px;display:flex;flex-direction:column;gap:10px}
+.tmsg{background:var(--surface-3);border:1px solid var(--line);border-radius:9px;padding:10px 14px;max-width:760px}
+.tmsg.web{border-color:rgba(179,130,47,.45);background:rgba(179,130,47,.08)}
+.tmsg.system{background:transparent;border-style:dashed;color:var(--ink-2)}
+.tmeta{display:flex;align-items:center;gap:9px;margin-bottom:3px}
+.tmeta b{font-size:13.5px}
+.viachip{font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;padding:2px 7px;border-radius:99px;
+  background:rgba(179,130,47,.2);color:#e0b96a;border:1px solid rgba(179,130,47,.4)}
+.viachip.sys{background:var(--surface-3);color:var(--ink-2);border-color:var(--line-2)}
+.replybar{display:flex;gap:9px;padding:13px 20px;border-top:1px solid var(--line)}
+.replybar input{flex:1;background:var(--surface-3);border:1px solid var(--line-2);border-radius:8px;
+  color:var(--ink-1);padding:10px 13px;font:inherit;font-size:14px}
+.replybar input:focus{outline:none;border-color:var(--gold, #b3822f)}
+.tile-link{cursor:pointer}
+.tile-link:hover{border-color:var(--line-2)}
 .reason{color:var(--ink-2);overflow-wrap:anywhere}
 .evnote{color:var(--ink-3);font-size:12.5px;margin-top:4px}
 .evnote::before{content:"⌁ ";color:var(--gold-dim)}
@@ -163,6 +184,7 @@ input::placeholder{color:var(--ink-3)}
 .b-unban,.b-release{background:var(--moss-tint);color:#7ec98d;border-color:rgba(95,174,111,.35)}
 .b-dungeon{background:var(--rune-tint);color:#a99bff;border-color:rgba(143,127,240,.4)}
 .b-note,.b-neutral{background:var(--surface-3);color:var(--ink-2);border-color:var(--line-2)}
+.b-report{background:var(--ember-tint);color:#f28b78;border-color:rgba(200,68,47,.4)}
 
 /* chart */
 .chartbox{position:relative}
@@ -383,7 +405,7 @@ input::placeholder{color:var(--ink-3)}
   .tiles{grid-template-columns:1fr 1fr;gap:10px}
   .tile{padding:13px 15px}
   .tile .value{font-size:25px}
-  .g-feed,.g-state{display:block}
+  .g-feed,.g-state,.g-report,.g-ticket{display:block}
   .row{display:block;padding:15px 18px}
   .row>*{margin-bottom:9px}
   .row>*:last-child{margin-bottom:0}
