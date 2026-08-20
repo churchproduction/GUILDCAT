@@ -75,6 +75,15 @@ export function createWebServer({ config, queries, roblox, service, checkStaff, 
     if (!Number.isInteger(reporterId) || !Number.isInteger(targetId) || reason.length < 4) {
       return res.status(400).json({ error: "reporter.id, target.id and a reason are required" });
     }
+    // Shadow-blocked abuser: tell the game "ok" so they see the normal thanks,
+    // but nothing is stored or posted.
+    if (queries.isReporterBlacklisted(reporterId)) {
+      return res.json({ ok: true });
+    }
+    // One report per reporter per target — a repeat adds nothing.
+    if (queries.hasReportAbout(reporterId, targetId)) {
+      return res.json({ ok: true, duplicate: true });
+    }
     const report = {
       reporter_user_id: reporterId,
       reporter_name: String(b.reporter?.name ?? reporterId).slice(0, 60),
