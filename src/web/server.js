@@ -129,9 +129,9 @@ export function createWebServer({ config, queries, roblox, service, checkStaff, 
     console.log(`[trap] ${who.name ?? userId} (${userId}) fired "${remoteName}" total=${b.total ?? "?"}`);
     const total = Number.isInteger(parseInt(b.total, 10)) ? parseInt(b.total, 10) : null;
 
-    const hasPending = queries.userHasPendingHoneypot(userId);
     const prevMax = queries.maxPendingHoneypotTotal(userId);
-    if (hasPending && total !== null && prevMax !== null && total <= prevMax) {
+    if (total !== null && prevMax !== null && total <= prevMax) {
+      console.log(`[trap] dropped as duplicate (total ${total} <= known ${prevMax})`);
       return res.json({ ok: true, duplicate: true }); // already have this one
     }
 
@@ -145,15 +145,8 @@ export function createWebServer({ config, queries, roblox, service, checkStaff, 
       job_id: b.jobId ? String(b.jobId).slice(0, 60) : null,
     };
     const id = queries.insertHoneypotHit(hit);
-    (async () => {
-      const avatarUrl = !hasPending
-        ? await roblox.getHeadshotUrl(userId).catch(() => null)
-        : null;
-      await bridge?.postHoneypotHit(
-        { ...hit, id, created_at: nowIso() },
-        { firstForUser: !hasPending, avatarUrl }
-      );
-    })().catch(() => {});
+    // postHit decides whether to post (one message per player until punished).
+    Promise.resolve(bridge?.postHoneypotHit({ ...hit, id, created_at: nowIso() })).catch(() => {});
     res.json({ ok: true, id });
   };
   app.post("/api/game/trap", trapRoute);      // the game's endpoint

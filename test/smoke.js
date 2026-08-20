@@ -496,7 +496,7 @@ ok("blacklisted reporter is shadow-dropped; remove works");
 console.log("honeypot");
 
 const bridgeHoney = [];
-bridgeStub.postHoneypotHit = async (hit, meta) => bridgeHoney.push([hit, meta]);
+bridgeStub.postHoneypotHit = async (hit) => bridgeHoney.push(hit);
 
 res = await fetch(`${base}/api/game/honeypot`, {
   method: "POST", headers: { "Content-Type": "application/json" },
@@ -533,9 +533,10 @@ assert.equal(res.status, 200);
 await new Promise((r) => setTimeout(r, 50));
 assert.equal(q.pendingHoneypotHits().length, 3);
 assert.equal(q.pendingHoneypotUserCount(), 2);
-// only each user's FIRST catch is flagged for a channel post
-assert.equal(bridgeHoney.filter(([, m]) => m.firstForUser).length, 2);
-ok("trap hits stack, dedupe by running total, one channel post per player");
+// every recorded (non-duplicate) hit is handed to the bot; the bot itself
+// decides whether to actually post (one live message per player)
+assert.equal(bridgeHoney.length, 3);
+ok("trap hits stack, dedupe by running total, handed to the bot");
 
 const punished = q.markHoneypotPunished("seniorTester");
 assert.equal(punished, 3);

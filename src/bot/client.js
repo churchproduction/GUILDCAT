@@ -24,7 +24,7 @@ export async function startBot({ config, queries, roblox, service }) {
   });
 
   const tickets = createTicketSystem({ client, config, queries });
-  const honeypot = createHoneypot({ client, config, queries, service });
+  const honeypot = createHoneypot({ client, config, queries, service, roblox });
   const { dispatch, isMod, isSenior } = buildHandlers({
     queries,
     roblox,

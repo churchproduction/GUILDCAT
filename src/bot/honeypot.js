@@ -15,7 +15,7 @@ import {
 } from "discord.js";
 import { joinServerUrl, formatDuration, parseDuration, clamp } from "../format.js";
 
-export function createHoneypot({ client, config, queries, service }) {
+export function createHoneypot({ client, config, queries, service, roblox }) {
   let sentenceSeconds = null; // permanent by default
   try {
     sentenceSeconds = parseDuration(config.honeypot.sentence);
@@ -38,22 +38,25 @@ export function createHoneypot({ client, config, queries, service }) {
         .setStyle(ButtonStyle.Danger)
     );
 
-  /* ── a new catch arrives (called by the web server) ────── */
+  /* ── a new catch arrives (called by the web server) ──────
+     One channel message per player until they're punished. Tracked in memory
+     so a missed post (bot restart, perms fixed later) self-heals — the next
+     hit re-posts instead of the player being stuck silently in the stack. */
+  const posted = new Set(); // user ids that currently have a live message
 
-  async function postHit(hit, { firstForUser, avatarUrl }) {
+  async function postHit(hit) {
     if (!config.honeypot.channelId) {
       console.warn("[trap] HONEYPOT_CHANNEL_ID is not set — hit stored but not posted");
       return;
     }
-    // A looping exploit can fire hundreds of times — only the user's FIRST
-    // pending catch gets its own message; the rest just stack in the database.
-    if (!firstForUser) return;
+    if (posted.has(hit.user_id)) return; // already showing a message for them
     try {
       const channel = await client.channels.fetch(config.honeypot.channelId);
       if (!channel?.isTextBased()) {
         console.warn(`[trap] channel ${config.honeypot.channelId} isn't a text channel the bot can post to`);
         return;
       }
+      const avatarUrl = await roblox.getHeadshotUrl(hit.user_id).catch(() => null);
       console.log(`[trap] posting hit to #${channel.name ?? config.honeypot.channelId}`);
 
       const pendingUsers = queries.pendingHoneypotUserCount();
@@ -88,6 +91,7 @@ export function createHoneypot({ client, config, queries, service }) {
       }
 
       await channel.send({ embeds: [embed], components: rows });
+      posted.add(hit.user_id);
     } catch (err) {
       console.warn("Couldn't post honeypot hit:", err.message);
     }
@@ -162,6 +166,7 @@ export function createHoneypot({ client, config, queries, service }) {
     }
 
     queries.markHoneypotPunished(interaction.user.username);
+    posted.clear(); // stack cleared → fresh messages for anyone caught next
 
     const embed = new EmbedBuilder()
       .setColor(done.length ? 0x9085e9 : 0x99332e)
