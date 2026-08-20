@@ -52,7 +52,11 @@ export function createWebServer({ config, queries, roblox, service, checkStaff, 
   });
 
   app.get("/api/stats", requireAuth, (req, res) => {
-    res.json({ ...queries.stats(), openReports: queries.openReportCount() });
+    res.json({
+      ...queries.stats(),
+      openReports: queries.openReportCount(),
+      openTickets: queries.openTicketCount(),
+    });
   });
 
   /* ── in-game exploit reports (posted by the game server) ──

@@ -482,6 +482,9 @@ export function makeQueries(db) {
     openReportCount: () =>
       db.prepare(`SELECT COUNT(*) AS n FROM reports WHERE status='open'`).get().n,
 
+    openTicketCount: () =>
+      db.prepare(`SELECT COUNT(*) AS n FROM tickets WHERE status='open'`).get().n,
+
     /* ── Discord tickets ─────────────────────────────────── */
 
     createTicket: (t) =>

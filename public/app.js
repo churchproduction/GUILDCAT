@@ -476,14 +476,27 @@ async function renderOverview() {
   const [stats, recent] = await Promise.all([api("/api/stats"), api("/api/actions?page=1")]);
   const typeCount = (t) => stats.byType.find((r) => r.type === t)?.count ?? 0;
 
+  const openReports = stats.openReports ?? 0;
+  const openTickets = stats.openTickets ?? 0;
+  const attention = openReports + openTickets > 0
+    ? `<div class="card attn">
+        ${openReports > 0 ? `<a class="attnitem" href="#/reports">
+          <b>${openReports}</b> open in-game report${openReports === 1 ? "" : "s"} waiting on a mod
+          <span class="grow"></span><span class="go">Review →</span></a>` : ""}
+        ${openTickets > 0 ? `<a class="attnitem" href="#/tickets">
+          <b>${openTickets}</b> open ticket${openTickets === 1 ? "" : "s"} in Discord
+          <span class="grow"></span><span class="go">Open →</span></a>` : ""}
+      </div>`
+    : "";
+
   main.innerHTML = `
-  ${head("Overview", "The last 30 days in your realm", searchboxHtml("globalSearch", "Search player, ID, or profile link"))}
+  ${head("Overview", "Search a player, or jump into a section below", searchboxHtml("globalSearch", "Search player, ID, or profile link"))}
+  ${attention}
   <div class="tiles">
-    <div class="tile"><div class="label">Active bans</div><div class="value ember">${stats.activeBans}</div><div class="subv">${typeCount("ban")} issued all-time</div></div>
-    <div class="tile"><div class="label">In the dungeon</div><div class="value rune">${stats.activeDungeons}</div><div class="subv">${typeCount("dungeon")} sentences all-time</div></div>
-    <div class="tile"><div class="label">Actions · 30 days</div><div class="value gold">${stats.actions30d}</div><div class="subv">${stats.totalActions} all-time</div></div>
-    <div class="tile"><div class="label">Players on record</div><div class="value">${stats.playersTouched}</div><div class="subv">${typeCount("warn")} warnings · ${typeCount("kick")} kicks</div></div>
-    <div class="tile tile-link" onclick="location.hash='#/reports'"><div class="label">Open reports</div><div class="value ${stats.openReports > 0 ? "ember" : ""}">${stats.openReports ?? 0}</div><div class="subv">from in-game players</div></div>
+    <a class="tile" href="#/bans"><div class="label">Active bans</div><div class="value ember">${stats.activeBans}</div><div class="subv">${typeCount("ban")} issued all-time</div></a>
+    <a class="tile" href="#/dungeon"><div class="label">In the dungeon</div><div class="value rune">${stats.activeDungeons}</div><div class="subv">${typeCount("dungeon")} sentences all-time</div></a>
+    <a class="tile" href="#/actions"><div class="label">Actions · 30 days</div><div class="value gold">${stats.actions30d}</div><div class="subv">${stats.totalActions} all-time</div></a>
+    <a class="tile" href="#/actions"><div class="label">Players on record</div><div class="value">${stats.playersTouched}</div><div class="subv">${typeCount("warn")} warnings · ${typeCount("kick")} kicks</div></a>
   </div>
   <div class="card"><div class="chead"><h2>ACTIVITY</h2></div><div class="cbody">${activityChart(stats.byDay)}</div></div>
   <div class="card"><div class="chead"><h2>LATEST</h2><span class="grow"></span><a class="btn ghost sm" href="#/actions">View all →</a></div>
@@ -560,9 +573,9 @@ const renderDungeon = makeStateListView({
 const actionsState = { type: "", q: "", page: 1 };
 
 async function renderActions() {
-  document.title = "Warden — ledger";
+  document.title = "Warden — action log";
   main.innerHTML = `
-  ${head("The Ledger", "Every ban, dungeon, kick, warning, and note")}
+  ${head("Action Log", "Every ban, dungeon, kick, warning, note, and report")}
   <div class="toolbar">
     <div class="seg">${[["", "All"], ["ban", "Bans"], ["unban", "Unbans"], ["dungeon", "Dungeon"], ["release", "Releases"], ["kick", "Kicks"], ["warn", "Warns"], ["note", "Notes"], ["report", "Reports"]]
       .map(([val, label]) => `<button type="button" data-type="${val}" class="${val === actionsState.type ? "active" : ""}">${label}</button>`).join("")}</div>
@@ -732,8 +745,10 @@ async function renderReports() {
           <div class="when" style="margin-top:4px">reported by ${esc(r.reporter_name)}</div></div>
         <div class="bydim"><div class="when" title="${esc(fmtDate(r.created_at))}">${rel(r.created_at)}</div></div>
         <div>${status}</div>
-        <div class="rowactions" style="display:flex;gap:7px;justify-content:flex-end">
-          ${join ? `<a class="btn sm primary" href="${esc(join)}" target="_blank" rel="noopener">Join server</a>` : ""}
+        <div class="rowactions" style="display:flex;gap:7px;justify-content:flex-end;align-items:center">
+          ${join
+            ? `<a class="btn sm primary" href="${esc(join)}" target="_blank" rel="noopener">Join server</a>`
+            : `<span class="when">no server (Studio test)</span>`}
           ${r.status === "open" ? `<button class="btn ghost sm" data-handled="${r.id}">Handled ✓</button>` : ""}
         </div>
       </div>`;
@@ -812,9 +827,13 @@ async function renderTicket(id) {
   const msgHtml = (m) => {
     const atts = (m.attachments || []).map((a) =>
       `<a class="evlink" href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.name || "attachment")} ↗</a>`).join(" ");
+    const who = m.via === "web"
+      ? `<b>Moderation Team</b><span class="when">· ${esc(m.author_name)}</span>`
+      : m.via === "system"
+        ? `<b>${esc(m.author_name)}</b><span class="viachip sys">system</span>`
+        : `<b>${esc(m.author_name)}</b>`;
     return `<div class="tmsg ${m.via}">
-      <div class="tmeta"><b>${esc(m.author_name)}</b>
-        ${m.via === "web" ? '<span class="viachip">dashboard</span>' : m.via === "system" ? '<span class="viachip sys">system</span>' : ""}
+      <div class="tmeta">${who}
         <span class="when" title="${esc(fmtDate(m.created_at))}">${rel(m.created_at)}</span></div>
       ${m.content ? `<div class="tbody">${esc(m.content)}</div>` : ""}
       ${atts ? `<div style="margin-top:5px">${atts}</div>` : ""}
@@ -835,7 +854,7 @@ async function renderTicket(id) {
     <div class="thread" id="thread">${data.messages.map(msgHtml).join("") || `<div class="empty">No messages yet.</div>`}</div>
     ${open ? `
     <div class="replybar">
-      <input id="replyText" type="text" maxlength="1800" placeholder="Reply as the bot — shows in the Discord channel"
+      <input id="replyText" type="text" maxlength="1800" placeholder="Reply as Moderation Team — posts in the Discord ticket"
         autocomplete="off">
       <button class="btn primary" id="replySend">Send</button>
     </div>` : ""}
@@ -880,14 +899,42 @@ async function renderTicket(id) {
 
 /* ── router / boot ───────────────────────────────────────── */
 
-const NAV = [
-  ["#/", "overview", "Overview"],
-  ["#/bans", "bans", "Bans"],
-  ["#/dungeon", "dungeon", "Dungeon"],
-  ["#/reports", "reports", "Reports"],
-  ["#/tickets", "tickets", "Tickets"],
-  ["#/actions", "actions", "The Ledger"],
+/* [href, key, sidebar label, mobile label] grouped under small headings */
+const NAV_GROUPS = [
+  { title: "", items: [["#/", "overview", "Overview", "Home"]] },
+  {
+    title: "Moderation",
+    items: [
+      ["#/bans", "bans", "Bans", "Bans"],
+      ["#/dungeon", "dungeon", "Dungeon", "Dungeon"],
+      ["#/actions", "actions", "Action Log", "Log"],
+    ],
+  },
+  {
+    title: "Inbox",
+    items: [
+      ["#/reports", "reports", "Reports", "Reports"],
+      ["#/tickets", "tickets", "Tickets", "Tickets"],
+    ],
+  },
 ];
+
+/* open counts shown as little badges on Reports / Tickets */
+let navCounts = { reports: 0, tickets: 0 };
+function paintNavCounts() {
+  document.querySelectorAll("[data-pill]").forEach((el) => {
+    const n = navCounts[el.dataset.pill] ?? 0;
+    el.textContent = n;
+    el.hidden = n === 0;
+  });
+}
+async function updateNavCounts() {
+  try {
+    const s = await api("/api/stats");
+    navCounts = { reports: s.openReports ?? 0, tickets: s.openTickets ?? 0 };
+    paintNavCounts();
+  } catch {}
+}
 const ICONS = {
   overview: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="2"/><rect x="14" y="3" width="7" height="5" rx="2"/><rect x="14" y="12" width="7" height="9" rx="2"/><rect x="3" y="16" width="7" height="5" rx="2"/></svg>',
   bans: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="m5.8 5.8 12.4 12.4"/></svg>',
@@ -898,10 +945,17 @@ const ICONS = {
 };
 
 function setNav(active) {
-  $("#nav").innerHTML = NAV.map(([href, key, label]) =>
-    `<a href="${href}" class="${key === active ? "active" : ""}">${ICONS[key]}${label}</a>`).join("");
-  $("#mnav").innerHTML = NAV.map(([href, key, label]) =>
-    `<a href="${href}" class="${key === active ? "active" : ""}">${ICONS[key]}${key === "actions" ? "Ledger" : label}</a>`).join("");
+  const pill = (key) =>
+    key === "reports" || key === "tickets"
+      ? `<span class="npill" data-pill="${key}" ${navCounts[key] > 0 ? "" : "hidden"}>${navCounts[key]}</span>`
+      : "";
+  $("#nav").innerHTML = NAV_GROUPS.map((g) =>
+    (g.title ? `<div class="ngroup">${g.title}</div>` : "") +
+    g.items.map(([href, key, label]) =>
+      `<a href="${href}" class="${key === active ? "active" : ""}">${ICONS[key]}<span>${label}</span>${pill(key)}</a>`).join("")
+  ).join("");
+  $("#mnav").innerHTML = NAV_GROUPS.flatMap((g) => g.items).map(([href, key, , short]) =>
+    `<a href="${href}" class="${key === active ? "active" : ""}">${ICONS[key]}${short}</a>`).join("");
 }
 
 async function route() {
@@ -910,6 +964,7 @@ async function route() {
   const userMatch = hash.match(/^\/user\/(\d+)$/);
   const ticketMatch = hash.match(/^\/ticket\/(\d+)$/);
   clearInterval(ticketPoll);
+  updateNavCounts(); // refresh the little badges in the background
   try {
     if (userMatch) { setNav(""); await renderUser(userMatch[1]); }
     else if (ticketMatch) { setNav("tickets"); await renderTicket(ticketMatch[1]); }

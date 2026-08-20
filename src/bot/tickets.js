@@ -403,8 +403,10 @@ export function createTicketSystem({ client, config, queries }) {
   async function sendTicketReply(ticket, staff, text) {
     if (!ticket.channel_id) throw new Error("This ticket has no Discord channel anymore.");
     const channel = await client.channels.fetch(ticket.channel_id);
+    // Members see one consistent voice; WHO sent it is recorded in the
+    // transcript + audit trail, not shown in the channel.
     await channel.send({
-      content: `**${staff.displayName ?? staff.username}** · from the dashboard\n${clamp(text, 1800)}`,
+      content: `**Moderation Team**\n${clamp(text, 1800)}`,
       allowedMentions: { parse: [] },
     });
   }
@@ -415,7 +417,7 @@ export function createTicketSystem({ client, config, queries }) {
       closedBy: {
         id: staff.id,
         name: staff.username,
-        mention: `${staff.displayName ?? staff.username} (dashboard)`,
+        mention: "Moderation Team",
         via: "web",
       },
     });
@@ -439,9 +441,9 @@ export function createTicketSystem({ client, config, queries }) {
         )
         .addFields(
           { name: "What they said", value: clamp(report.reason, 900) },
-          ...(report.job_id
-            ? [{ name: "Server", value: `\`${report.job_id}\``, inline: true }]
-            : []),
+          report.job_id
+            ? { name: "Server", value: `\`${report.job_id}\``, inline: true }
+            : { name: "Server", value: "none — Studio test (real reports get a Join button)", inline: true },
           { name: "Record", value: `${config.web.baseUrl}/#/user/${report.target_user_id}`, inline: true }
         )
         .setTimestamp(new Date(report.created_at ?? Date.now()));
