@@ -172,17 +172,17 @@ export function buildDefinitions() {
     new SlashCommandBuilder()
       .setName("close")
       .setDescription("Close this ticket. Report tickets need reporter + player (+ evidence).")
-      .addUserOption((o) =>
-        o.setName("reporter").setDescription("Report tickets: the Discord user who reported")
-      )
       .addStringOption((o) =>
         o.setName("player").setDescription("Report tickets: Roblox username of the reported player")
       )
-      .addAttachmentOption((o) =>
-        o.setName("evidence").setDescription("Image or video evidence")
-      )
       .addStringOption((o) =>
-        o.setName("evidence_link").setDescription("Link to video evidence")
+        o.setName("evidence_link").setDescription("Link to video evidence (Medal, YouTube, Streamable…)")
+      )
+      .addAttachmentOption((o) =>
+        o.setName("evidence").setDescription("Image or video evidence file")
+      )
+      .addUserOption((o) =>
+        o.setName("reporter").setDescription("Who reported — leave empty to use whoever opened the ticket")
       )
       .addStringOption((o) =>
         o.setName("notes").setDescription("What was found / decided")
@@ -603,21 +603,26 @@ export function buildHandlers({ queries, roblox, config, service, tickets }) {
       }
 
       // User-report ticket: the close IS the paperwork.
-      const reporter = interaction.options.getUser("reporter");
+      let reporter = interaction.options.getUser("reporter");
       const playerQuery = interaction.options.getString("player");
       const attachment = interaction.options.getAttachment("evidence");
       const link = interaction.options.getString("evidence_link");
       const notes = interaction.options.getString("notes");
 
+      // The reporter is almost always whoever opened the ticket — fill it in.
+      if (!reporter) {
+        reporter = await interaction.client.users.fetch(ticket.opener_id).catch(() => null);
+      }
+
       const missing = [];
-      if (!reporter) missing.push("`reporter` — the Discord user who reported");
+      if (!reporter) missing.push("`reporter` — couldn't find the ticket opener, pick them yourself");
       if (!playerQuery) missing.push("`player` — the reported player's Roblox username");
+      if (!attachment && !link) missing.push("`evidence_link` (or an `evidence` file) — proof is required");
       if (missing.length) {
         return interaction.editReply({
           content:
             "Report tickets can only be closed with the details filled in. Missing:\n" +
-            missing.map((m) => `• ${m}`).join("\n") +
-            "\nAdd `evidence` (or `evidence_link`) too if you have it.",
+            missing.map((m) => `• ${m}`).join("\n"),
         });
       }
 
