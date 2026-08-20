@@ -94,6 +94,17 @@ const SUPPORT_TABLES_SQL = `
   );
   CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_reports_target ON reports(target_user_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_reports_pair ON reports(reporter_user_id, target_user_id);
+
+  -- Roblox users blocked from sending in-game exploit reports (abuse).
+  -- Shadow-blocked: their game still says "thanks", nothing arrives.
+  CREATE TABLE IF NOT EXISTS report_blacklist (
+    user_id    INTEGER PRIMARY KEY,
+    username   TEXT NOT NULL,
+    reason     TEXT,
+    added_by   TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
 
   -- Discord tickets ('report' = user report, 'support' = support ticket).
   CREATE TABLE IF NOT EXISTS tickets (
@@ -478,6 +489,35 @@ export function makeQueries(db) {
     setReportHandled: (id, handledBy) =>
       db.prepare(`UPDATE reports SET status='handled', handled_by=?, handled_at=?
                   WHERE id=? AND status='open'`).run(handledBy, nowIso(), id).changes > 0,
+
+    /** Has this reporter already reported this target (ever)? */
+    hasReportAbout: (reporterId, targetId) =>
+      Boolean(
+        db.prepare(`SELECT 1 FROM reports WHERE reporter_user_id=? AND target_user_id=? LIMIT 1`)
+          .get(reporterId, targetId)
+      ),
+
+    /* ── report blacklist (abusive reporters, shadow-blocked) ── */
+
+    blacklistReporter: (r) =>
+      db.prepare(`
+        INSERT INTO report_blacklist (user_id, username, reason, added_by, created_at)
+        VALUES (@user_id, @username, @reason, @added_by, @created_at)
+        ON CONFLICT(user_id) DO UPDATE SET
+          username = excluded.username,
+          reason = excluded.reason,
+          added_by = excluded.added_by,
+          created_at = excluded.created_at
+      `).run({ reason: null, ...r, created_at: nowIso() }),
+
+    unblacklistReporter: (userId) =>
+      db.prepare(`DELETE FROM report_blacklist WHERE user_id = ?`).run(userId).changes > 0,
+
+    isReporterBlacklisted: (userId) =>
+      Boolean(db.prepare(`SELECT 1 FROM report_blacklist WHERE user_id = ?`).get(userId)),
+
+    listReportBlacklist: () =>
+      db.prepare(`SELECT * FROM report_blacklist ORDER BY created_at DESC`).all(),
 
     openReportCount: () =>
       db.prepare(`SELECT COUNT(*) AS n FROM reports WHERE status='open'`).get().n,
