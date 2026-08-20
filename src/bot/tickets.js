@@ -260,9 +260,10 @@ export function createTicketSystem({ client, config, queries }) {
           ? {
               name: "Closing this ticket",
               value:
-                "Report tickets are closed with `/close` **with the details filled in**: " +
-                "the reporter's Discord user, the reported player's Roblox username, and evidence. " +
-                "That files the report on the player's record automatically.",
+                "Staff close report tickets with `/close`: the reported player's Roblox " +
+                "username + evidence (link or file) — both required. The reporter is filled " +
+                "in automatically from whoever opened this ticket. Closing files the report " +
+                "on the player's record.",
             }
           : {
               name: "Closing this ticket",
