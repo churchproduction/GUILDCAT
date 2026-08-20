@@ -1,0 +1,22 @@
+{
+  "name": "warden",
+  "version": "1.1.0",
+  "description": "Discord moderation bot for a Roblox game — ban, kick, warn, and audit players, with a staff web dashboard.",
+  "type": "module",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "preview": "node test/preview.js",
+    "test": "node test/smoke.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.2.0",
+    "cookie-session": "^2.1.0",
+    "discord.js": "^14.16.3",
+    "express": "^4.21.2"
+  }
+}
