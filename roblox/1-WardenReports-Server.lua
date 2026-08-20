@@ -59,7 +59,7 @@ local function sendToWarden(reporter, target, description)
 		end)
 		if not ok then
 			warn("[WardenReports] request failed:", result)
-			return false
+			return nil
 		end
 		if not result.Success then
 			warn("[WardenReports] Warden said:", result.StatusCode, result.Body)

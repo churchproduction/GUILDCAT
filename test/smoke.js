@@ -459,6 +459,90 @@ assert.equal(q.getReport(gameReport.id).status, "handled");
 assert.ok(auditEvents.some((e) => e.type === "report_handled" && e.source === "web"));
 ok("mod can mark a report handled (audited)");
 
+// same reporter reporting the same target again → accepted quietly, stored once
+res = await fetch(`${base}/api/game/report`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json", "x-warden-key": "game-secret" },
+  body: JSON.stringify({
+    reporter: { id: 555, name: "GoodGuy" },
+    target: { id: 666, name: "BadGuy" },
+    reason: "still killing through walls",
+  }),
+});
+assert.equal(res.status, 200);
+assert.equal((await res.json()).duplicate, true);
+assert.equal(q.listReports({ status: "all" }).total, 1);
+ok("second report about the same player is dropped as a duplicate");
+
+// blacklisted reporters get shadow-dropped
+q.blacklistReporter({ user_id: 555, username: "GoodGuy", reason: "spamming fake reports", added_by: "modTester" });
+assert.equal(q.isReporterBlacklisted(555), true);
+res = await fetch(`${base}/api/game/report`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json", "x-warden-key": "game-secret" },
+  body: JSON.stringify({
+    reporter: { id: 555, name: "GoodGuy" },
+    target: { id: 777, name: "SomeoneElse" },
+    reason: "made-up nonsense report",
+  }),
+});
+assert.equal(res.status, 200); // the game still hears "ok" — shadow-blocked
+assert.equal(q.listReports({ status: "all" }).total, 1);
+assert.ok(q.unblacklistReporter(555));
+assert.equal(q.isReporterBlacklisted(555), false);
+ok("blacklisted reporter is shadow-dropped; remove works");
+
+/* ── honeypot ───────────────────────────────────────────── */
+console.log("honeypot");
+
+const bridgeHoney = [];
+bridgeStub.postHoneypotHit = async (hit, meta) => bridgeHoney.push([hit, meta]);
+
+res = await fetch(`${base}/api/game/honeypot`, {
+  method: "POST", headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ player: { id: 9 }, remote: "GiveCoins" }),
+});
+assert.equal(res.status, 401);
+ok("honeypot without the secret → 401");
+
+const honeyPost = (body) =>
+  fetch(`${base}/api/game/honeypot`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-warden-key": "game-secret" },
+    body: JSON.stringify(body),
+  });
+
+// the game's contract: /api/game/trap with user + running total
+const trapPost = (body) =>
+  fetch(`${base}/api/game/trap`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-warden-key": "game-secret" },
+    body: JSON.stringify(body),
+  });
+
+res = await trapPost({ user: { id: 777, name: "Cheater77" }, remote: "GiveCash",
+  total: 1, placeId: "123", jobId: "srv-1" });
+assert.equal(res.status, 200);
+res = await trapPost({ user: { id: 777, name: "Cheater77" }, remote: "SetWalkSpeed", total: 2 });
+assert.equal(res.status, 200);
+// resend with the same total → dropped as a duplicate
+res = await trapPost({ user: { id: 777, name: "Cheater77" }, remote: "SetWalkSpeed", total: 2 });
+assert.equal((await res.json()).duplicate, true);
+res = await honeyPost({ player: { id: 778, name: "Cheater78" }, remote: "GiveCoins" });
+assert.equal(res.status, 200);
+await new Promise((r) => setTimeout(r, 50));
+assert.equal(q.pendingHoneypotHits().length, 3);
+assert.equal(q.pendingHoneypotUserCount(), 2);
+// only each user's FIRST catch is flagged for a channel post
+assert.equal(bridgeHoney.filter(([, m]) => m.firstForUser).length, 2);
+ok("trap hits stack, dedupe by running total, one channel post per player");
+
+const punished = q.markHoneypotPunished("seniorTester");
+assert.equal(punished, 3);
+assert.equal(q.pendingHoneypotHits().length, 0);
+assert.equal(q.userHasPendingHoneypot(777), false);
+ok("punishing clears the stack");
+
 /* ── tickets ────────────────────────────────────────────── */
 console.log("tickets");
 

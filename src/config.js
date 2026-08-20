@@ -51,6 +51,11 @@ export const config = {
   game: {
     reportSecret: env("GAME_REPORT_SECRET", null),       // shared secret the game script sends
   },
+  honeypot: {
+    channelId: env("HONEYPOT_CHANNEL_ID", null),         // fake-remote catches land here
+    adminRoleIds: idList("HONEYPOT_ADMIN_ROLE_IDS"),     // who may press the punish button
+    sentence: env("HONEYPOT_SENTENCE", "permanent"),     // dungeon time for caught exploiters
+  },
   roblox: {
     apiKey: env("ROBLOX_API_KEY"),
     universeId: env("ROBLOX_UNIVERSE_ID"),

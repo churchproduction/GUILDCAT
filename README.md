@@ -20,8 +20,9 @@ sentences, evidence, and each player's full audit history.
 | `/note user text [evidence]` | Moderators | Attaches a staff note to their record. |
 | `/evidence user [file] [link] [context]` | Moderators | Adds evidence to a player's record on its own. |
 | `/audit user` | Moderators | Full record: live ban + dungeon status, counts, recent history, dashboard link. |
+| `/blacklist add\|remove\|list user [reason]` | Moderators | Blocks a Roblox user from sending in-game exploit reports (shadow-blocked: they still see "thanks", nothing arrives). One report per reporter per target is also enforced automatically. |
 | `/ticketpanel [type] [report_image] [support_image]` | **Senior staff** | Posts the ticket panels in the current channel — the red "EXPLOITER REPORT" panel and/or the blue "GENERAL SUPPORT" panel, each with its own button. Attach banner images to match your server's look. Opening a ticket pings `TICKET_PING_ROLE_IDS` (or the mod roles if unset). |
-| `/close [reporter] [player] [evidence] [notes]` | Moderators | Closes the ticket you run it in. Support tickets need no options. **User-report tickets require** `reporter` (their Discord user) + `player` (the reported Roblox username) — closing files a "Player report" entry with the evidence on that player's record. |
+| `/close [player] [evidence_link] [evidence] [reporter] [notes]` | Moderators | Closes the ticket you run it in. Support tickets need no options. **User-report tickets require** `player` (the reported Roblox username) and evidence (`evidence_link` or an `evidence` file); the reporter defaults to whoever opened the ticket. Closing files a "Player report" entry with the evidence on that player's record. |
 
 `user` accepts a username, a numeric user ID, or a profile URL everywhere.
 Server administrators always count as senior staff. Every command takes an
@@ -45,6 +46,14 @@ server** button that puts a mod into the exact server it came from, and on
 the dashboard's **Reports** page with the same button. Mods mark them handled
 there. Setup is one ModuleScript — see `roblox/WardenReportRelay.lua`, three
 steps at the top of the file.
+
+**Honeypot (fake remotes):** the game carries bait RemoteEvents no honest
+player can ever fire — only exploiters reach them. Every catch posts to
+`HONEYPOT_CHANNEL_ID` and stacks. One button — allowed only for
+`HONEYPOT_ADMIN_ROLE_IDS` (plus the server owner) — sends the entire stack to
+the dungeon (`HONEYPOT_SENTENCE`, default permanent), files a Dungeon entry
+per player with the auto reason, and attaches everything they fired as text
+evidence. Game side is one script: `roblox/4-Honeypot-Server.lua`.
 
 **How the dungeon works:** the dungeon is a pool of hidden private servers of
 your own game (reserved servers) — same map, always your latest version,

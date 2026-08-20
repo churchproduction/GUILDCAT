@@ -8,6 +8,7 @@ import {
 } from "discord.js";
 import { buildDefinitions, buildHandlers } from "./commands.js";
 import { createTicketSystem } from "./tickets.js";
+import { createHoneypot } from "./honeypot.js";
 
 export async function startBot({ config, queries, roblox, service }) {
   const client = new Client({
@@ -23,6 +24,7 @@ export async function startBot({ config, queries, roblox, service }) {
   });
 
   const tickets = createTicketSystem({ client, config, queries });
+  const honeypot = createHoneypot({ client, config, queries, service });
   const { dispatch, isMod, isSenior } = buildHandlers({
     queries,
     roblox,
@@ -49,7 +51,8 @@ export async function startBot({ config, queries, roblox, service }) {
     if (interaction.guildId !== config.discord.guildId) return;
     try {
       if (interaction.isButton() || interaction.isModalSubmit()) {
-        await tickets.handleInteraction(interaction);
+        const handled = await tickets.handleInteraction(interaction);
+        if (!handled) await honeypot.handleInteraction(interaction);
         return;
       }
       if (interaction.isChatInputCommand()) await dispatch(interaction);
@@ -70,6 +73,7 @@ export async function startBot({ config, queries, roblox, service }) {
       postGameReport: tickets.postGameReport,
       sendTicketReply: tickets.sendTicketReply,
       webCloseSupport: tickets.webCloseSupport,
+      postHoneypotHit: honeypot.postHit,
     },
 
     /**

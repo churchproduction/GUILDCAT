@@ -106,6 +106,25 @@ const SUPPORT_TABLES_SQL = `
     created_at TEXT NOT NULL
   );
 
+  -- Players caught firing fake (honeypot) remote events. 'pending' hits stack
+  -- until an admin presses the punish button, which dungeons them all.
+  CREATE TABLE IF NOT EXISTS honeypot_hits (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL,
+    username    TEXT NOT NULL,
+    remote_name TEXT NOT NULL,
+    args        TEXT,            -- what the exploiter fired it with (if known)
+    total       INTEGER,         -- the game's running total of traps fired (dedupe)
+    place_id    TEXT,
+    job_id      TEXT,
+    status      TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','punished')),
+    punished_by TEXT,
+    punished_at TEXT,
+    created_at  TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_honeypot_status ON honeypot_hits(status, created_at);
+  CREATE INDEX IF NOT EXISTS idx_honeypot_user ON honeypot_hits(user_id, status);
+
   -- Discord tickets ('report' = user report, 'support' = support ticket).
   CREATE TABLE IF NOT EXISTS tickets (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -179,6 +198,11 @@ function migrate(db) {
   }
 
   db.exec(SUPPORT_TABLES_SQL);
+  // Older honeypot_hits tables (created before the game sent totals) get the column added.
+  const honeyCols = db.prepare(`PRAGMA table_info(honeypot_hits)`).all().map((c) => c.name);
+  if (!honeyCols.includes("total")) {
+    db.exec(`ALTER TABLE honeypot_hits ADD COLUMN total INTEGER`);
+  }
   db.pragma(`user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -518,6 +542,36 @@ export function makeQueries(db) {
 
     listReportBlacklist: () =>
       db.prepare(`SELECT * FROM report_blacklist ORDER BY created_at DESC`).all(),
+
+    /* ── honeypot (fake remote) catches ──────────────────── */
+
+    insertHoneypotHit: (h) =>
+      Number(
+        db.prepare(`
+          INSERT INTO honeypot_hits (user_id, username, remote_name, args, total, place_id, job_id, created_at)
+          VALUES (@user_id, @username, @remote_name, @args, @total, @place_id, @job_id, @created_at)
+        `).run({ args: null, total: null, place_id: null, job_id: null, ...h, created_at: nowIso() })
+          .lastInsertRowid
+      ),
+
+    /** Highest running-total we've seen among this user's pending hits (null = none pending). */
+    maxPendingHoneypotTotal: (userId) =>
+      db.prepare(`SELECT MAX(total) AS m FROM honeypot_hits WHERE user_id=? AND status='pending'`)
+        .get(userId)?.m ?? null,
+
+    /** Does this user already have a pending hit? (avoids channel spam) */
+    userHasPendingHoneypot: (userId) =>
+      Boolean(db.prepare(`SELECT 1 FROM honeypot_hits WHERE user_id=? AND status='pending' LIMIT 1`).get(userId)),
+
+    pendingHoneypotHits: () =>
+      db.prepare(`SELECT * FROM honeypot_hits WHERE status='pending' ORDER BY id`).all(),
+
+    pendingHoneypotUserCount: () =>
+      db.prepare(`SELECT COUNT(DISTINCT user_id) AS n FROM honeypot_hits WHERE status='pending'`).get().n,
+
+    markHoneypotPunished: (punishedBy) =>
+      db.prepare(`UPDATE honeypot_hits SET status='punished', punished_by=?, punished_at=?
+                  WHERE status='pending'`).run(punishedBy, nowIso()).changes,
 
     openReportCount: () =>
       db.prepare(`SELECT COUNT(*) AS n FROM reports WHERE status='open'`).get().n,

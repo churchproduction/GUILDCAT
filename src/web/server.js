@@ -81,7 +81,8 @@ export function createWebServer({ config, queries, roblox, service, checkStaff, 
       return res.json({ ok: true });
     }
     // One report per reporter per target — a repeat adds nothing.
-    if (queries.hasReportAbout(reporterId, targetId)) {
+    // Self-reports are Studio tests, they always go through.
+    if (reporterId !== targetId && queries.hasReportAbout(reporterId, targetId)) {
       return res.json({ ok: true, duplicate: true });
     }
     const report = {
@@ -101,6 +102,57 @@ export function createWebServer({ config, queries, roblox, service, checkStaff, 
     })().catch(() => {});
     res.json({ ok: true, id });
   });
+
+  /* ── honeypot / trap catches (posted by the game server) ──
+     The game's contract: POST /api/game/trap
+       { user: {id, name}, remote, total, placeId, jobId }
+     `total` is the player's running total across all traps and sessions —
+     a resend with the same or lower total is dropped as a duplicate. */
+  const trapRoute = async (req, res) => {
+    if (!config.game.reportSecret) {
+      return res.status(503).json({ error: "GAME_REPORT_SECRET is not configured" });
+    }
+    if (req.get("x-warden-key") !== config.game.reportSecret) {
+      return res.status(401).json({ error: "bad key" });
+    }
+    const b = req.body ?? {};
+    const who = b.user ?? b.player ?? {};
+    const userId = parseInt(who.id, 10);
+    const remoteName = String(b.remote ?? "").trim().slice(0, 80);
+    if (!Number.isInteger(userId) || userId <= 0 || !remoteName) {
+      return res.status(400).json({ error: "user.id and remote are required" });
+    }
+    const total = Number.isInteger(parseInt(b.total, 10)) ? parseInt(b.total, 10) : null;
+
+    const hasPending = queries.userHasPendingHoneypot(userId);
+    const prevMax = queries.maxPendingHoneypotTotal(userId);
+    if (hasPending && total !== null && prevMax !== null && total <= prevMax) {
+      return res.json({ ok: true, duplicate: true }); // already have this one
+    }
+
+    const hit = {
+      user_id: userId,
+      username: String(who.name ?? userId).slice(0, 60),
+      remote_name: remoteName,
+      args: b.args ? String(b.args).slice(0, 1500) : null,
+      total,
+      place_id: b.placeId ? String(b.placeId).slice(0, 30) : null,
+      job_id: b.jobId ? String(b.jobId).slice(0, 60) : null,
+    };
+    const id = queries.insertHoneypotHit(hit);
+    (async () => {
+      const avatarUrl = !hasPending
+        ? await roblox.getHeadshotUrl(userId).catch(() => null)
+        : null;
+      await bridge?.postHoneypotHit(
+        { ...hit, id, created_at: nowIso() },
+        { firstForUser: !hasPending, avatarUrl }
+      );
+    })().catch(() => {});
+    res.json({ ok: true, id });
+  };
+  app.post("/api/game/trap", trapRoute);      // the game's endpoint
+  app.post("/api/game/honeypot", trapRoute);  // same thing, older name
 
   const stateListRoute = (listFn) => (req, res) => {
     const { limit, offset, page } = pageParams(req);

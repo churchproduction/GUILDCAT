@@ -522,6 +522,7 @@ export function createTicketSystem({ client, config, queries }) {
       );
 
       await channel.send({
+        content: `${modPing()} — new in-game report`,
         embeds: [embed],
         components: [new ActionRowBuilder().addComponents(...buttons)],
       });
