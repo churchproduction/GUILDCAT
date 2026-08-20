@@ -2,31 +2,106 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="robots" content="noindex">
-  <title>Warden</title>
+  <title>GuildCat — Warden</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='2' y='2' width='12' height='12' fill='%233987e5'/%3E%3C/svg%3E">
+  <link rel="icon" href="logo.png">
 </head>
 <body>
-  <header class="topbar" id="topbar" hidden>
-    <a class="wordmark" href="#/"><span class="tick"></span>Warden</a>
-    <nav class="nav" id="nav">
-      <a href="#/" data-nav="overview">Overview</a>
-      <a href="#/bans" data-nav="bans">Bans</a>
-      <a href="#/dungeon" data-nav="dungeon">Dungeon</a>
-      <a href="#/actions" data-nav="actions">Actions</a>
-    </nav>
-    <div class="searchbox">
-      <svg class="search-ico" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-      <input id="globalSearch" type="search" placeholder="Search player, ID, or profile link" autocomplete="off" spellcheck="false">
-      <div class="search-pop" id="searchPop"></div>
-    </div>
-    <div class="userchip" id="userchip"></div>
-  </header>
 
-  <main id="view"></main>
+<!-- ═══ Entrance (shown when signed out) ═══ -->
+<div class="enter" id="enter" hidden>
+  <div class="cbank cb1"></div><div class="cbank cb2"></div><div class="cbank cb3"></div>
+  <div class="eflash"></div><div class="eflash f2"></div>
+  <div class="bolt b1"><svg viewBox="0 0 160 420" preserveAspectRatio="none">
+    <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M84,0 L73,52 L86,60 L64,132 L77,139 L52,224 L63,229 L38,318 L47,323 L28,420" stroke="rgba(150,180,255,.28)" stroke-width="13"/>
+      <path d="M84,0 L73,52 L86,60 L64,132" stroke="#e6eeff" stroke-width="5"/>
+      <path d="M64,132 L77,139 L52,224 L63,229" stroke="#e6eeff" stroke-width="3.4"/>
+      <path d="M63,229 L38,318 L47,323 L28,420" stroke="#eef4ff" stroke-width="2.2"/>
+      <path d="M64,132 L44,168 L32,182 M52,224 L74,258 L80,276" stroke="rgba(222,233,255,.75)" stroke-width="1.6"/>
+    </g>
+  </svg></div>
+  <div class="bolt b2"><svg viewBox="0 0 160 420" preserveAspectRatio="none">
+    <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M62,0 L78,56 L64,66 L92,148 L78,156 L104,248 L92,254 L116,338 L106,344 L124,420" stroke="rgba(150,180,255,.28)" stroke-width="13"/>
+      <path d="M62,0 L78,56 L64,66 L92,148" stroke="#e6eeff" stroke-width="5"/>
+      <path d="M92,148 L78,156 L104,248 L92,254" stroke="#e6eeff" stroke-width="3.4"/>
+      <path d="M92,254 L116,338 L106,344 L124,420" stroke="#eef4ff" stroke-width="2.2"/>
+      <path d="M92,148 L116,184 L128,198 M104,248 L82,282" stroke="rgba(222,233,255,.75)" stroke-width="1.6"/>
+    </g>
+  </svg></div>
+  <div class="mist"></div>
 
-  <script src="app.js"></script>
+  <div class="sea">
+    <div class="wave w1"><svg viewBox="0 0 1200 240" preserveAspectRatio="none">
+      <path d="M0,92 Q60,58 120,88 Q180,112 250,86 Q320,60 390,90 Q460,116 540,88 Q610,58 690,92 Q760,118 840,90 Q910,62 990,88 Q1060,110 1130,86 Q1170,72 1200,92 V240 H0 Z" fill="#0b1322"/>
+      <path d="M0,92 Q60,58 120,88 Q180,112 250,86 Q320,60 390,90 Q460,116 540,88 Q610,58 690,92 Q760,118 840,90 Q910,62 990,88 Q1060,110 1130,86 Q1170,72 1200,92" fill="none" stroke="rgba(180,200,230,.07)" stroke-width="3"/>
+    </svg></div>
+    <div class="wave w2"><svg viewBox="0 0 1200 240" preserveAspectRatio="none">
+      <path d="M0,100 Q70,42 150,96 Q220,132 300,98 Q380,56 460,100 Q540,136 620,96 Q700,50 780,100 Q860,134 940,98 Q1020,54 1100,96 Q1150,120 1200,100 V240 H0 Z" fill="#0d1728"/>
+      <path d="M0,100 Q70,42 150,96 Q220,132 300,98 Q380,56 460,100 Q540,136 620,96 Q700,50 780,100 Q860,134 940,98 Q1020,54 1100,96 Q1150,120 1200,100" fill="none" stroke="rgba(180,200,230,.10)" stroke-width="3"/>
+    </svg></div>
+    <div class="boatwrap"><svg viewBox="0 0 440 260">
+      <path d="M220,38 L84,150 M220,38 L360,152 M220,38 L220,150" stroke="rgba(200,215,245,.09)" stroke-width="1.4" fill="none"/>
+      <path d="M150,52 C195,72 250,72 292,52 L284,132 C242,152 198,152 156,132 Z" fill="#201218"/>
+      <path d="M168,58 L164,138 M200,66 L198,146 M232,66 L234,146 M264,58 L268,138" stroke="rgba(0,0,0,.45)" stroke-width="7"/>
+      <path d="M150,52 C195,72 250,72 292,52" fill="none" stroke="rgba(200,215,245,.14)" stroke-width="2.5"/>
+      <rect x="216" y="34" width="8" height="122" rx="3" fill="#0b0e15"/>
+      <circle cx="220" cy="34" r="4" fill="rgba(216,162,74,.45)"/>
+      <path d="M52,164 C120,196 320,196 396,158 L376,196 C300,226 150,226 76,198 Z" fill="#070a10"/>
+      <path d="M52,164 C120,196 320,196 396,158" fill="none" stroke="rgba(216,162,74,.35)" stroke-width="2.5"/>
+      <path d="M52,164 C30,150 22,122 34,100 C38,88 52,82 62,88 C50,92 44,104 48,116 C52,130 60,142 74,152 Z" fill="#070a10"/>
+      <circle cx="49" cy="97" r="2.5" fill="rgba(216,162,74,.5)"/>
+      <path d="M396,158 C412,146 418,126 410,110 C420,122 424,142 414,160 C408,168 400,170 392,168 Z" fill="#070a10"/>
+      <g stroke="rgba(216,162,74,.22)" stroke-width="1.6">
+        <circle cx="128" cy="176" r="13" fill="#0a0e17"/><circle cx="176" cy="182" r="13" fill="#0c1019"/>
+        <circle cx="224" cy="184" r="13" fill="#0a0e17"/><circle cx="272" cy="182" r="13" fill="#0c1019"/>
+        <circle cx="318" cy="175" r="13" fill="#0a0e17"/>
+      </g>
+      <g fill="rgba(216,162,74,.3)"><circle cx="128" cy="176" r="2.2"/><circle cx="176" cy="182" r="2.2"/><circle cx="224" cy="184" r="2.2"/><circle cx="272" cy="182" r="2.2"/><circle cx="318" cy="175" r="2.2"/></g>
+    </svg></div>
+    <div class="wave w3"><svg viewBox="0 0 1200 240" preserveAspectRatio="none">
+      <path d="M0,108 Q40,70 90,106 Q140,134 200,104 Q250,66 310,108 Q360,138 420,106 Q470,72 530,110 Q580,136 640,104 Q690,64 750,108 Q800,140 860,106 Q910,70 970,110 Q1020,134 1080,104 Q1140,74 1200,108 V240 H0 Z" fill="#101d31"/>
+      <path d="M0,108 Q40,70 90,106 Q140,134 200,104 Q250,66 310,108 Q360,138 420,106 Q470,72 530,110 Q580,136 640,104 Q690,64 750,108 Q800,140 860,106 Q910,70 970,110 Q1020,134 1080,104 Q1140,74 1200,108" fill="none" stroke="rgba(200,215,240,.12)" stroke-width="3"/>
+    </svg></div>
+  </div>
+  <div class="evign"></div>
+  <div class="rainlayer" id="rainlayer"></div>
+
+  <div class="hero">
+    <div class="logocircle"><img src="logo.png" alt="GuildCat Games"></div>
+    <h1 class="gc" id="gctitle">GUILD CAT</h1>
+    <p class="esub">Wrongdoers row the dungeon servers. Everyone else sails free.</p>
+    <a class="btn primary enterbtn" href="/auth/login">ENTER</a>
+  </div>
+</div>
+
+<!-- ═══ Panel ═══ -->
+<div class="mtop" id="mtop" hidden>
+  <span class="brandlogo" style="width:26px;height:26px"><img src="logo.png" alt=""></span>
+  <span class="name">WARDEN</span>
+  <span class="mav" id="mav"></span>
+</div>
+<div class="shell" id="shell" hidden>
+  <aside class="side">
+    <a class="brand" href="#/"><span class="brandlogo"><img src="logo.png" alt=""></span><span class="name">WARDEN</span></a>
+    <div class="runes">ᚠ ᚢ ᚦ ᚨ ᚱ ᚲ</div>
+    <nav class="snav" id="nav"></nav>
+    <div class="spacer"></div>
+    <div class="whoami" id="whoami"></div>
+  </aside>
+  <main class="main" id="main"></main>
+</div>
+<nav class="mnav" id="mnav" hidden></nav>
+
+<div class="overlay" id="overlay"><div class="modal" id="modal"></div></div>
+<div class="toasts" id="toasts"></div>
+
+<script src="app.js"></script>
 </body>
 </html>

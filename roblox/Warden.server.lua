@@ -165,10 +165,107 @@ local function sendHome(player)
 	player:Kick("Your dungeon time is over — rejoin the game normally.")
 end
 
+-- ── "DUNGEON SERVER" banner (shown to everyone in a dungeon server) ──
+local bannerSubtitles = {} -- player → the small text label under the title
+
+local function formatRemaining(endsAt)
+	if endsAt == math.huge then
+		return "Permanent sentence"
+	end
+	local left = endsAt - os.time()
+	if left <= 0 then
+		return "Releasing…"
+	end
+	local d = math.floor(left / 86400)
+	local h = math.floor((left % 86400) / 3600)
+	local m = math.floor((left % 3600) / 60)
+	if d > 0 then
+		return ("Time left: %dd %dh"):format(d, h)
+	elseif h > 0 then
+		return ("Time left: %dh %dm"):format(h, m)
+	end
+	return ("Time left: %dm"):format(math.max(m, 1))
+end
+
+local function updateBanner(player)
+	local sub = bannerSubtitles[player]
+	local endsAt = sentenceEnds[player]
+	if not sub or not sub.Parent or not endsAt then
+		return
+	end
+	local reason = player:GetAttribute("DungeonReason")
+	local text = formatRemaining(endsAt)
+	if type(reason) == "string" and #reason > 0 then
+		text = text .. "  ·  " .. reason
+	end
+	sub.Text = text
+end
+
+local function ensureBanner(player)
+	task.spawn(function()
+		local pg = player:FindFirstChildOfClass("PlayerGui") or player:WaitForChild("PlayerGui", 10)
+		if not pg or pg:FindFirstChild("WardenDungeonBanner") then
+			return
+		end
+
+		local gui = Instance.new("ScreenGui")
+		gui.Name = "WardenDungeonBanner"
+		gui.ResetOnSpawn = false
+		gui.DisplayOrder = 1000
+
+		local frame = Instance.new("Frame")
+		frame.AnchorPoint = Vector2.new(0.5, 0)
+		frame.Position = UDim2.new(0.5, 0, 0, 6)
+		frame.Size = UDim2.new(0, 360, 0, 56)
+		frame.BackgroundColor3 = Color3.fromRGB(16, 16, 16)
+		frame.BackgroundTransparency = 0.15
+		frame.BorderSizePixel = 0
+		frame.Parent = gui
+
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0, 10)
+		corner.Parent = frame
+
+		local stroke = Instance.new("UIStroke")
+		stroke.Color = Color3.fromRGB(208, 59, 59)
+		stroke.Thickness = 2
+		stroke.Parent = frame
+
+		local title = Instance.new("TextLabel")
+		title.BackgroundTransparency = 1
+		title.Size = UDim2.new(1, -16, 0, 26)
+		title.Position = UDim2.new(0, 8, 0, 5)
+		title.Font = Enum.Font.GothamBlack
+		title.TextSize = 20
+		title.TextColor3 = Color3.fromRGB(235, 85, 85)
+		title.Text = "DUNGEON SERVER"
+		title.Parent = frame
+
+		local sub = Instance.new("TextLabel")
+		sub.BackgroundTransparency = 1
+		sub.Size = UDim2.new(1, -16, 0, 18)
+		sub.Position = UDim2.new(0, 8, 0, 32)
+		sub.Font = Enum.Font.Gotham
+		sub.TextSize = 13
+		sub.TextColor3 = Color3.fromRGB(200, 200, 200)
+		sub.TextTruncate = Enum.TextTruncate.AtEnd
+		sub.Text = ""
+		sub.Parent = frame
+
+		gui.Parent = pg
+		bannerSubtitles[player] = sub
+		updateBanner(player)
+	end)
+end
+
 local function markSentenced(player, permanent, expiresAt, reason)
 	sentenceEnds[player] = permanent and math.huge or (expiresAt or math.huge)
 	player:SetAttribute("DungeonReason", tostring(reason or ""))
 	player:SetAttribute("DungeonExpiresAt", permanent and 0 or (expiresAt or 0))
+	if IS_DUNGEON then
+		ensureBanner(player)
+		updateBanner(player)
+	end
 end
 
 -- ── figure out which kind of server this is ───────────────
@@ -211,9 +308,10 @@ end)
 
 Players.PlayerRemoving:Connect(function(player)
 	sentenceEnds[player] = nil
+	bannerSubtitles[player] = nil
 end)
 
--- ── dungeon: free players whose time is up ────────────────
+-- ── dungeon: free players whose time is up + tick the banner ──
 task.spawn(function()
 	while true do
 		task.wait(30)
@@ -223,6 +321,8 @@ task.spawn(function()
 				if endsAt ~= math.huge and now >= endsAt then
 					sentenceEnds[player] = nil
 					sendHome(player)
+				else
+					updateBanner(player)
 				end
 			end
 		end

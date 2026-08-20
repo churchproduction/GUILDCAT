@@ -291,9 +291,39 @@ export function makeQueries(db) {
     return { rows: withEvidence(rows), total };
   };
 
+  const deleteAction = db.transaction((actionId) => {
+    const action = db.prepare(`SELECT id FROM actions WHERE id = ?`).get(actionId);
+    if (!action) return { ok: false, notFound: true };
+
+    const now = nowIso();
+    const activeBacking = db
+      .prepare(
+        `SELECT 1 AS x FROM bans WHERE action_id = @id AND (expires_at IS NULL OR expires_at > @now)
+         UNION ALL
+         SELECT 1 FROM dungeons WHERE action_id = @id AND (expires_at IS NULL OR expires_at > @now)`
+      )
+      .get({ id: actionId, now });
+    if (activeBacking) {
+      return { ok: false, blocked: true }; // lift the ban/sentence first
+    }
+
+    const evidenceFiles = db
+      .prepare(`SELECT file_name FROM evidence WHERE action_id = ? AND file_name IS NOT NULL`)
+      .all(actionId)
+      .map((r) => r.file_name);
+
+    db.prepare(`DELETE FROM evidence WHERE action_id = ?`).run(actionId);
+    // expired state rows referencing this action go too
+    db.prepare(`DELETE FROM bans WHERE action_id = ?`).run(actionId);
+    db.prepare(`DELETE FROM dungeons WHERE action_id = ?`).run(actionId);
+    db.prepare(`DELETE FROM actions WHERE id = ?`).run(actionId);
+    return { ok: true, evidenceFiles };
+  });
+
   return {
     recordAction,
     insertEvidence,
+    deleteAction,
 
     getPlayer: (userId) =>
       db.prepare(`SELECT * FROM players WHERE user_id = ?`).get(userId),

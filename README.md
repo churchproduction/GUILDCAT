@@ -139,12 +139,25 @@ entire moderation record.
 
 ## The dashboard
 
-Discord sign-in, restricted to `MOD_ROLE_IDS` + `SENIOR_ROLE_IDS`. You get:
-an overview with activity stats; a searchable ban list and dungeon list
-(active/expired); the full action log filterable by type; and a profile page
-per player with live ban + dungeon status and their complete timeline —
-including every piece of attached evidence (images inline, videos playable,
-links out).
+A public entrance page (storm, longship, GUILD CAT) with an ENTER button that
+goes to Discord sign-in — restricted to `MOD_ROLE_IDS` + `SENIOR_ROLE_IDS`.
+Inside: an overview with activity stats; searchable ban and dungeon lists
+(active/expired); the full action log; and a profile page per player with
+live ban + dungeon status, their complete timeline, and every piece of
+attached evidence (images inline, videos playable, links out).
+
+The dashboard also **acts**, with the same rules as Discord — roles re-checked
+against your server on every single request:
+
+| Web control | Who |
+|---|---|
+| New ban / Unban buttons | Senior staff |
+| Delete a log entry (✕) — blocked while it backs an active ban/sentence | Senior staff |
+| Send to dungeon / Release / Kick / Warn / Note | All mods |
+
+Buttons senior staff can use simply don't render for normal mods — and the
+server would refuse them anyway. Works on phones: the sidebar becomes a
+bottom tab bar.
 
 ## Troubleshooting
 

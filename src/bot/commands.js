@@ -1,23 +1,18 @@
 // Slash command definitions + handlers.
+// The actual moderation work lives in src/actions.js (shared with the web
+// dashboard) — this file is Discord glue: options, permissions, embeds.
 //
 // Permission tiers:
 //   • senior  (SENIOR_ROLE_IDS, or server admin)          → /ban, /unban + everything below
 //   • mod     (MOD_ROLE_IDS, SENIOR_ROLE_IDS, or admin)   → /dungeon, /release, /kick, /warn, /note, /evidence, /audit
-import fs from "node:fs/promises";
 import path from "node:path";
-import crypto from "node:crypto";
 import {
   SlashCommandBuilder,
   EmbedBuilder,
   PermissionFlagsBits,
   MessageFlags,
 } from "discord.js";
-import {
-  parseDuration,
-  formatDuration,
-  isoPlusSeconds,
-  ACTION_LABELS,
-} from "../format.js";
+import { parseDuration, formatDuration, ACTION_LABELS } from "../format.js";
 
 const COLORS = {
   ban: 0xd64550,
@@ -156,7 +151,7 @@ export function buildDefinitions() {
   ].map((c) => c.setDefaultMemberPermissions(PermissionFlagsBits.KickMembers).toJSON());
 }
 
-export function buildHandlers({ queries, roblox, config }) {
+export function buildHandlers({ queries, roblox, config, service }) {
   const hasAnyRole = (member, roleIds) => {
     const roles = member?.roles?.cache;
     return roleIds.some((id) => roles?.has?.(id));
@@ -173,8 +168,13 @@ export function buildHandlers({ queries, roblox, config }) {
     return isSenior(member) || hasAnyRole(member, config.discord.modRoleIds);
   }
 
+  const moderatorOf = (interaction) => ({
+    id: interaction.user.id,
+    name: interaction.user.username,
+  });
+
   async function resolveOrFail(interaction, query) {
-    const player = await roblox.resolveUser(query);
+    const player = await service.resolvePlayer(query);
     if (!player) {
       await interaction.editReply({
         embeds: [
@@ -188,19 +188,6 @@ export function buildHandlers({ queries, roblox, config }) {
     return player;
   }
 
-  async function enrichPlayer(player) {
-    const [avatarUrl, info] = await Promise.all([
-      roblox.getHeadshotUrl(player.id).catch(() => null),
-      roblox.getUserInfo(player.id).catch(() => null),
-    ]);
-    return {
-      ...player,
-      avatarUrl,
-      createdOn: info?.created ?? null,
-      displayName: player.displayName ?? info?.displayName ?? null,
-    };
-  }
-
   function playerLine(player) {
     const display =
       player.displayName && player.displayName !== player.name
@@ -211,12 +198,8 @@ export function buildHandlers({ queries, roblox, config }) {
 
   const dashboardLink = (userId) => `${config.web.baseUrl}/#/user/${userId}`;
 
-  /* ── evidence ─────────────────────────────────────────── */
+  /* ── evidence (Discord attachments/links → service) ────── */
 
-  /**
-   * Store an attachment and/or link as evidence rows for an action.
-   * Returns { parts: string[], problems: string[] } for the embed.
-   */
   async function collectEvidence(actionId, { attachment, link, uploadedBy }) {
     const parts = [];
     const problems = [];
@@ -238,18 +221,12 @@ export function buildHandlers({ queries, roblox, config }) {
           // Discord CDN links expire, so pull the bytes down now and keep them.
           const res = await fetch(attachment.url);
           if (!res.ok) throw new Error(`download failed (${res.status})`);
-          const buf = Buffer.from(await res.arrayBuffer());
-          await fs.mkdir(config.evidence.dir, { recursive: true });
-          const fileName = `${actionId}-${crypto.randomUUID()}${ext || ".bin"}`;
-          await fs.writeFile(path.join(config.evidence.dir, fileName), buf);
-          queries.insertEvidence({
-            action_id: actionId,
-            kind: "file",
-            file_name: fileName,
-            original_name: attachment.name ?? fileName,
-            content_type: attachment.contentType ?? null,
-            size_bytes: buf.length,
-            uploaded_by: uploadedBy,
+          const buffer = Buffer.from(await res.arrayBuffer());
+          await service.addEvidenceFile(actionId, {
+            buffer,
+            originalName: attachment.name,
+            contentType: attachment.contentType,
+            uploadedBy,
           });
           parts.push(`1 file (${attachment.name ?? "attachment"})`);
         } catch (err) {
@@ -261,12 +238,7 @@ export function buildHandlers({ queries, roblox, config }) {
 
     if (link) {
       if (/^https?:\/\/\S+$/i.test(link) && link.length <= 500) {
-        queries.insertEvidence({
-          action_id: actionId,
-          kind: "link",
-          url: link,
-          uploaded_by: uploadedBy,
-        });
+        service.addEvidenceLink(actionId, { url: link, uploadedBy });
         parts.push("1 link");
       } else {
         problems.push("evidence link skipped — must be a valid http(s) URL");
@@ -276,13 +248,11 @@ export function buildHandlers({ queries, roblox, config }) {
     return { parts, problems };
   }
 
-  function evidenceFromOptions(interaction) {
-    return {
-      attachment: interaction.options.getAttachment("evidence"),
-      link: interaction.options.getString("evidence_link"),
-      uploadedBy: interaction.user.id,
-    };
-  }
+  const evidenceFromOptions = (interaction) => ({
+    attachment: interaction.options.getAttachment("evidence"),
+    link: interaction.options.getString("evidence_link"),
+    uploadedBy: interaction.user.id,
+  });
 
   function evidenceFields({ parts, problems }) {
     const fields = [];
@@ -338,33 +308,16 @@ export function buildHandlers({ queries, roblox, config }) {
         return interaction.editReply({ content: err.message });
       }
 
-      const found = await resolveOrFail(interaction, query);
-      if (!found) return;
-      const player = await enrichPlayer(found);
+      const player = await resolveOrFail(interaction, query);
+      if (!player) return;
 
-      await roblox.banUser(player.id, {
-        durationSeconds,
-        privateReason: reason,
+      const { actionId } = await service.ban(player, {
+        reason,
         displayReason,
-        excludeAltAccounts: includeAlts,
+        durationSeconds,
+        includeAlts,
+        moderator: moderatorOf(interaction),
       });
-
-      const expiresAt = durationSeconds ? isoPlusSeconds(durationSeconds) : null;
-      const actionId = queries.recordAction(
-        {
-          type: "ban",
-          user_id: player.id,
-          username: player.name,
-          reason,
-          display_reason: displayReason,
-          duration_seconds: durationSeconds,
-          expires_at: expiresAt,
-          exclude_alts: includeAlts ? 1 : 0,
-          moderator_id: interaction.user.id,
-          moderator_name: interaction.user.username,
-        },
-        player
-      );
       const ev = await collectEvidence(actionId, evidenceFromOptions(interaction));
 
       await finish(interaction, actionEmbed({
@@ -388,22 +341,10 @@ export function buildHandlers({ queries, roblox, config }) {
       const query = interaction.options.getString("user", true);
       const reason = interaction.options.getString("reason") || null;
 
-      const found = await resolveOrFail(interaction, query);
-      if (!found) return;
-      const player = await enrichPlayer(found);
+      const player = await resolveOrFail(interaction, query);
+      if (!player) return;
 
-      await roblox.unbanUser(player.id);
-      queries.recordAction(
-        {
-          type: "unban",
-          user_id: player.id,
-          username: player.name,
-          reason,
-          moderator_id: interaction.user.id,
-          moderator_name: interaction.user.username,
-        },
-        player
-      );
+      await service.unban(player, { reason, moderator: moderatorOf(interaction) });
 
       await finish(interaction, actionEmbed({
         type: "unban",
@@ -422,40 +363,14 @@ export function buildHandlers({ queries, roblox, config }) {
       const reason = interaction.options.getString("reason", true);
 
       const durationSeconds = parseDuration(durationChoice); // null = permanent
-      const found = await resolveOrFail(interaction, query);
-      if (!found) return;
-      const player = await enrichPlayer(found);
+      const player = await resolveOrFail(interaction, query);
+      if (!player) return;
 
-      const expiresAtUnix = durationSeconds
-        ? Math.floor(Date.now() / 1000) + durationSeconds
-        : null;
-
-      // 1) Persist the sentence where the game can read it at join time.
-      await roblox.setDungeonSentence(player.id, {
-        expiresAtUnix,
+      const { actionId } = await service.dungeon(player, {
+        durationSeconds,
         reason,
-        moderator: interaction.user.username,
+        moderator: moderatorOf(interaction),
       });
-      // 2) If they're in game right now, move them immediately.
-      try {
-        await roblox.publishDungeonMove("send", player.id, { expiresAtUnix, reason });
-      } catch (err) {
-        console.warn("Dungeon live-move publish failed (sentence still saved):", err.message);
-      }
-
-      const actionId = queries.recordAction(
-        {
-          type: "dungeon",
-          user_id: player.id,
-          username: player.name,
-          reason,
-          duration_seconds: durationSeconds,
-          expires_at: durationSeconds ? isoPlusSeconds(durationSeconds) : null,
-          moderator_id: interaction.user.id,
-          moderator_name: interaction.user.username,
-        },
-        player
-      );
       const ev = await collectEvidence(actionId, evidenceFromOptions(interaction));
 
       await finish(interaction, actionEmbed({
@@ -480,28 +395,10 @@ export function buildHandlers({ queries, roblox, config }) {
       const query = interaction.options.getString("user", true);
       const reason = interaction.options.getString("reason") || null;
 
-      const found = await resolveOrFail(interaction, query);
-      if (!found) return;
-      const player = await enrichPlayer(found);
+      const player = await resolveOrFail(interaction, query);
+      if (!player) return;
 
-      await roblox.clearDungeonSentence(player.id);
-      try {
-        await roblox.publishDungeonMove("release", player.id, {});
-      } catch (err) {
-        console.warn("Release publish failed (sentence still cleared):", err.message);
-      }
-
-      queries.recordAction(
-        {
-          type: "release",
-          user_id: player.id,
-          username: player.name,
-          reason,
-          moderator_id: interaction.user.id,
-          moderator_name: interaction.user.username,
-        },
-        player
-      );
+      await service.release(player, { reason, moderator: moderatorOf(interaction) });
 
       await finish(interaction, actionEmbed({
         type: "release",
@@ -518,22 +415,13 @@ export function buildHandlers({ queries, roblox, config }) {
       const query = interaction.options.getString("user", true);
       const reason = interaction.options.getString("reason") || null;
 
-      const found = await resolveOrFail(interaction, query);
-      if (!found) return;
-      const player = await enrichPlayer(found);
+      const player = await resolveOrFail(interaction, query);
+      if (!player) return;
 
-      await roblox.kickUser(player.id, reason);
-      const actionId = queries.recordAction(
-        {
-          type: "kick",
-          user_id: player.id,
-          username: player.name,
-          reason,
-          moderator_id: interaction.user.id,
-          moderator_name: interaction.user.username,
-        },
-        player
-      );
+      const { actionId } = await service.kick(player, {
+        reason,
+        moderator: moderatorOf(interaction),
+      });
       const ev = await collectEvidence(actionId, evidenceFromOptions(interaction));
 
       await finish(interaction, actionEmbed({
@@ -553,21 +441,13 @@ export function buildHandlers({ queries, roblox, config }) {
       const query = interaction.options.getString("user", true);
       const reason = interaction.options.getString("reason", true);
 
-      const found = await resolveOrFail(interaction, query);
-      if (!found) return;
-      const player = await enrichPlayer(found);
+      const player = await resolveOrFail(interaction, query);
+      if (!player) return;
 
-      const actionId = queries.recordAction(
-        {
-          type: "warn",
-          user_id: player.id,
-          username: player.name,
-          reason,
-          moderator_id: interaction.user.id,
-          moderator_name: interaction.user.username,
-        },
-        player
-      );
+      const { actionId } = service.warn(player, {
+        reason,
+        moderator: moderatorOf(interaction),
+      });
       const ev = await collectEvidence(actionId, evidenceFromOptions(interaction));
 
       const warnCount =
@@ -589,21 +469,13 @@ export function buildHandlers({ queries, roblox, config }) {
       const query = interaction.options.getString("user", true);
       const text = interaction.options.getString("text", true);
 
-      const found = await resolveOrFail(interaction, query);
-      if (!found) return;
-      const player = await enrichPlayer(found);
+      const player = await resolveOrFail(interaction, query);
+      if (!player) return;
 
-      const actionId = queries.recordAction(
-        {
-          type: "note",
-          user_id: player.id,
-          username: player.name,
-          reason: text,
-          moderator_id: interaction.user.id,
-          moderator_name: interaction.user.username,
-        },
-        player
-      );
+      const { actionId } = service.note(player, {
+        text,
+        moderator: moderatorOf(interaction),
+      });
       const ev = await collectEvidence(actionId, evidenceFromOptions(interaction));
 
       await finish(interaction, actionEmbed({
@@ -630,21 +502,13 @@ export function buildHandlers({ queries, roblox, config }) {
         });
       }
 
-      const found = await resolveOrFail(interaction, query);
-      if (!found) return;
-      const player = await enrichPlayer(found);
+      const player = await resolveOrFail(interaction, query);
+      if (!player) return;
 
-      const actionId = queries.recordAction(
-        {
-          type: "note",
-          user_id: player.id,
-          username: player.name,
-          reason: context || "Evidence added",
-          moderator_id: interaction.user.id,
-          moderator_name: interaction.user.username,
-        },
-        player
-      );
+      const { actionId } = service.note(player, {
+        text: context || "Evidence added",
+        moderator: moderatorOf(interaction),
+      });
       const ev = await collectEvidence(actionId, {
         attachment,
         link,
@@ -665,9 +529,8 @@ export function buildHandlers({ queries, roblox, config }) {
 
     async audit(interaction) {
       const query = interaction.options.getString("user", true);
-      const found = await resolveOrFail(interaction, query);
-      if (!found) return;
-      const player = await enrichPlayer(found);
+      const player = await resolveOrFail(interaction, query);
+      if (!player) return;
 
       const [history, counts, localBan, liveRestriction, liveSentence] = await Promise.all([
         Promise.resolve(queries.userHistory(player.id)),
@@ -679,7 +542,7 @@ export function buildHandlers({ queries, roblox, config }) {
 
       const countFor = (t) => counts.find((c) => c.type === t)?.count ?? 0;
       const summary = ["ban", "dungeon", "kick", "warn", "note"]
-        .map((t) => `${countFor(t)} ${t === "dungeon" ? "dungeon" : t}${countFor(t) === 1 ? "" : "s"}`)
+        .map((t) => `${countFor(t)} ${t}${countFor(t) === 1 ? "" : "s"}`)
         .join(" · ");
 
       let banStatus;

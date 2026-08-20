@@ -7,6 +7,7 @@ import path from "node:path";
 import Keygrip from "keygrip";
 import { openDb, makeQueries } from "../src/db.js";
 import { createWebServer } from "../src/web/server.js";
+import { createModerationService } from "../src/actions.js";
 
 const db = openDb(":memory:");
 const q = makeQueries(db);
@@ -103,7 +104,15 @@ const config = {
   evidence: { dir: evidenceDir, maxMb: 25 },
 };
 const robloxStub = {
-  resolveUser: async () => null,
+  // any name/id resolves so the action buttons work in the preview
+  resolveUser: async (query) => {
+    const s = String(query).trim();
+    const known = players.find((p) => p.name.toLowerCase() === s.toLowerCase() || String(p.id) === s);
+    if (known) return { id: known.id, name: known.name, displayName: known.displayName };
+    let h = 0;
+    for (const c of s) h = (h * 31 + c.charCodeAt(0)) % 99999;
+    return { id: 900000 + h, name: s, displayName: s };
+  },
   getUserInfo: async () => null,
   getHeadshotUrl: async () => null,
   getRestriction: async (id) => ({ active: id === 101 }),
@@ -113,13 +122,24 @@ const robloxStub = {
       : id === 505
         ? { permanent: false, expiresAt: Math.floor(Date.now() / 1000) + 15 * 3600, reason: "Blocking the track" }
         : null,
+  banUser: async () => ({}),
+  unbanUser: async () => ({}),
+  setDungeonSentence: async () => ({}),
+  clearDungeonSentence: async () => ({}),
+  publishDungeonMove: async () => ({}),
+  kickUser: async () => ({}),
 };
-const app = createWebServer({ config, queries: q, roblox: robloxStub, checkStaff: async () => null });
+const service = createModerationService({ queries: q, roblox: robloxStub, config });
+const previewStaff = { id: "1", username: "preview", displayName: "Preview mode", senior: true };
+const app = createWebServer({
+  config, queries: q, roblox: robloxStub, service,
+  checkStaff: async () => previewStaff,
+});
 
 // Preview-only: skip Discord sign-in entirely. This route exists only here,
 // never in the real app.
 app.get("/preview-login", (req, res) => {
-  req.session.user = { id: "1", username: "preview", displayName: "Preview mode" };
+  req.session.user = previewStaff;
   res.redirect("/");
 });
 

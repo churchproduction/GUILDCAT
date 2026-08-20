@@ -11,6 +11,7 @@ import Keygrip from "keygrip";
 import { parseDuration, formatDuration } from "../src/format.js";
 import { openDb, makeQueries } from "../src/db.js";
 import { createWebServer } from "../src/web/server.js";
+import { createModerationService } from "../src/actions.js";
 import { buildHandlers } from "../src/bot/commands.js";
 
 let passed = 0;
@@ -176,7 +177,7 @@ const tierConfig = {
   web: { baseUrl: "http://x" },
   evidence: { dir: evidenceDir, maxMb: 25 },
 };
-const tiers = buildHandlers({ queries: q, roblox: {}, config: tierConfig });
+const tiers = buildHandlers({ queries: q, roblox: {}, config: tierConfig, service: {} });
 const member = (roleIds, admin = false) => ({
   permissions: { has: () => admin },
   roles: { cache: { has: (id) => roleIds.includes(id) } },
@@ -198,8 +199,12 @@ const config = {
   evidence: { dir: evidenceDir, maxMb: 25 },
 };
 const robloxStub = {
-  resolveUser: async (query) =>
-    String(query).toLowerCase() === "alicerbx" ? { id: 111, name: "AliceRBX", displayName: "Alice" } : null,
+  resolveUser: async (query) => {
+    const s = String(query).toLowerCase();
+    return s === "alicerbx" || s === "111"
+      ? { id: 111, name: "AliceRBX", displayName: "Alice" }
+      : null;
+  },
   getUserInfo: async (id) =>
     id === 999 ? { id, name: "Fresh", displayName: "Fresh", created: "2020-01-01T00:00:00Z" } : null,
   getHeadshotUrl: async () => null,
@@ -211,21 +216,36 @@ const robloxStub = {
     id === 333
       ? { permanent: false, expiresAt: Math.floor(Date.now() / 1000) + 999, reason: "Griefing" }
       : null,
+  // mutation no-ops so the service can run without the network
+  banUser: async () => ({}),
+  unbanUser: async () => ({}),
+  setDungeonSentence: async () => ({}),
+  clearDungeonSentence: async () => ({}),
+  publishDungeonMove: async () => ({}),
+  kickUser: async () => ({}),
 };
+const service = createModerationService({ queries: q, roblox: robloxStub, config });
+const checkStaffStub = async (id) =>
+  id === "senior1" ? { id, username: "seniorTester", senior: true }
+  : id === "mod1" ? { id, username: "modTester", senior: false }
+  : null;
 const app = createWebServer({
-  config, queries: q, roblox: robloxStub,
-  checkStaff: async () => null,
+  config, queries: q, roblox: robloxStub, service,
+  checkStaff: checkStaffStub,
 });
 
 const server = app.listen(0);
 await new Promise((r) => server.once("listening", r));
 const base = `http://127.0.0.1:${server.address().port}`;
 
-const sessionValue = Buffer.from(
-  JSON.stringify({ user: { id: "1", username: "tester", displayName: "Tester" } })
-).toString("base64");
-const sig = new Keygrip([SECRET]).sign(`warden.sid=${sessionValue}`);
-const authedHeaders = { Cookie: `warden.sid=${sessionValue}; warden.sid.sig=${sig}` };
+const cookieFor = (user) => {
+  const value = Buffer.from(JSON.stringify({ user })).toString("base64");
+  const sig = new Keygrip([SECRET]).sign(`warden.sid=${value}`);
+  return { Cookie: `warden.sid=${value}; warden.sid.sig=${sig}` };
+};
+const authedHeaders = cookieFor({ id: "1", username: "tester", displayName: "Tester" });
+const seniorHeaders = { ...cookieFor({ id: "senior1", username: "seniorTester", senior: true }), "Content-Type": "application/json" };
+const modHeaders = { ...cookieFor({ id: "mod1", username: "modTester", senior: false }), "Content-Type": "application/json" };
 
 let res = await fetch(`${base}/api/me`);
 assert.equal(res.status, 401);
@@ -283,8 +303,81 @@ ok("bad user id → 400");
 
 res = await fetch(`${base}/`);
 assert.equal(res.status, 200);
-assert.ok((await res.text()).includes("<title>Warden</title>"));
+assert.ok((await res.text()).includes("GuildCat"));
 ok("static dashboard served");
+
+/* ── web moderation actions ─────────────────────────────── */
+console.log("web moderation");
+
+// mods can't ban from the web
+res = await fetch(`${base}/api/mod/ban`, {
+  method: "POST", headers: modHeaders,
+  body: JSON.stringify({ user: "AliceRBX", reason: "web test", duration: "" }),
+});
+assert.equal(res.status, 403);
+ok("web ban blocked for normal mods");
+
+// senior staff can
+res = await fetch(`${base}/api/mod/ban`, {
+  method: "POST", headers: seniorHeaders,
+  body: JSON.stringify({ user: "AliceRBX", reason: "web ban test", duration: "1d" }),
+});
+assert.equal(res.status, 200);
+assert.equal(q.currentBan(111).active, true);
+ok("web ban works for senior staff");
+
+// mods can dungeon from the web
+res = await fetch(`${base}/api/mod/dungeon`, {
+  method: "POST", headers: modHeaders,
+  body: JSON.stringify({ user: "AliceRBX", reason: "web dungeon test", duration: "1h" }),
+});
+assert.equal(res.status, 200);
+const dungeonedNow = q.currentDungeon(111);
+assert.equal(dungeonedNow.active, true);
+ok("web dungeon works for mods");
+
+// deleting the entry behind an ACTIVE sentence is refused
+const backingActionId = dungeonedNow.id;
+res = await fetch(`${base}/api/mod/actions/${backingActionId}`, {
+  method: "DELETE", headers: seniorHeaders,
+});
+assert.equal(res.status, 409);
+ok("delete blocked while sentence is active");
+
+// release, then the delete goes through
+res = await fetch(`${base}/api/mod/release`, {
+  method: "POST", headers: modHeaders,
+  body: JSON.stringify({ user: "111" }),
+});
+assert.equal(res.status, 200);
+res = await fetch(`${base}/api/mod/actions/${backingActionId}`, {
+  method: "DELETE", headers: seniorHeaders,
+});
+assert.equal(res.status, 200);
+assert.ok(!q.userHistory(111).some((a) => a.id === backingActionId));
+ok("release then delete removes the entry");
+
+// deletes are senior-only
+res = await fetch(`${base}/api/mod/actions/1`, { method: "DELETE", headers: modHeaders });
+assert.equal(res.status, 403);
+ok("delete blocked for normal mods");
+
+// web unban clears the ban state
+res = await fetch(`${base}/api/mod/unban`, {
+  method: "POST", headers: seniorHeaders,
+  body: JSON.stringify({ user: "111" }),
+});
+assert.equal(res.status, 200);
+assert.equal(q.currentBan(111), null);
+ok("web unban clears the ban");
+
+// bad target → 400 with a message
+res = await fetch(`${base}/api/mod/warn`, {
+  method: "POST", headers: modHeaders,
+  body: JSON.stringify({ user: "nobody-here", reason: "x" }),
+});
+assert.equal(res.status, 400);
+ok("unknown player → 400");
 
 server.close();
 fs.rmSync(tmp, { recursive: true, force: true });

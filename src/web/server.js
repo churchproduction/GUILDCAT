@@ -4,14 +4,14 @@ import cookieSession from "cookie-session";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerAuthRoutes } from "./auth.js";
-import { nowIso } from "../format.js";
+import { nowIso, parseDuration } from "../format.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "..", "..", "public");
 
 const PAGE_SIZE = 25;
 
-export function createWebServer({ config, queries, roblox, checkStaff }) {
+export function createWebServer({ config, queries, roblox, service, checkStaff }) {
   const app = express();
   app.set("trust proxy", 1); // Railway/Render sit behind a proxy
   app.use(express.json());
@@ -171,6 +171,148 @@ export function createWebServer({ config, queries, roblox, checkStaff }) {
       dungeonStatus,
       now: nowIso(),
     });
+  });
+
+  /* ── moderation actions from the web ─────────────────────
+     Roles are re-checked against Discord on EVERY call — a stale session
+     or a fired mod can't act. Senior gates: ban, unban, delete log. */
+
+  const bad = (msg) => {
+    const e = new Error(msg);
+    e.status = 400;
+    return e;
+  };
+
+  const requireStaff = (needSenior) => async (req, res, next) => {
+    if (!req.session?.user) return res.status(401).json({ error: "not signed in" });
+    const staff = await checkStaff(req.session.user.id);
+    if (!staff) {
+      req.session = null;
+      return res.status(401).json({ error: "you're no longer staff" });
+    }
+    if (needSenior && !staff.senior) {
+      return res.status(403).json({ error: "senior staff only" });
+    }
+    req.staff = staff;
+    next();
+  };
+
+  const modAction = (needSenior, fn) => [
+    requireStaff(needSenior),
+    async (req, res) => {
+      try {
+        const moderator = { id: req.staff.id, name: req.staff.username };
+        const result = await fn(req.body ?? {}, moderator);
+        res.json({ ok: true, ...result });
+      } catch (err) {
+        if (err.status === 400) return res.status(400).json({ error: err.message });
+        console.error("Web action failed:", err);
+        res.status(502).json({ error: err.message ?? "action failed" });
+      }
+    },
+  ];
+
+  async function resolveTarget(body) {
+    const query = String(body.user ?? "").trim();
+    if (!query) throw bad("Player is required");
+    const player = await service.resolvePlayer(query);
+    if (!player) throw bad(`No Roblox user found for "${query}"`);
+    return player;
+  }
+
+  function parseDurationOr400(input) {
+    try {
+      return parseDuration(input);
+    } catch (err) {
+      throw bad(err.message);
+    }
+  }
+
+  const summary = (player, actionId) => ({
+    actionId,
+    player: { id: player.id, name: player.name, displayName: player.displayName },
+  });
+
+  app.post("/api/mod/ban", ...modAction(true, async (body, moderator) => {
+    const player = await resolveTarget(body);
+    const reason = String(body.reason ?? "").trim();
+    if (!reason) throw bad("Reason is required");
+    const durationSeconds = parseDurationOr400(body.duration);
+    const { actionId } = await service.ban(player, {
+      reason,
+      displayReason: String(body.display_reason ?? "").trim() || reason,
+      durationSeconds,
+      includeAlts: body.include_alts !== false,
+      moderator,
+    });
+    return summary(player, actionId);
+  }));
+
+  app.post("/api/mod/unban", ...modAction(true, async (body, moderator) => {
+    const player = await resolveTarget(body);
+    const { actionId } = await service.unban(player, {
+      reason: String(body.reason ?? "").trim() || null,
+      moderator,
+    });
+    return summary(player, actionId);
+  }));
+
+  app.post("/api/mod/dungeon", ...modAction(false, async (body, moderator) => {
+    const player = await resolveTarget(body);
+    const reason = String(body.reason ?? "").trim();
+    if (!reason) throw bad("Reason is required");
+    const durationSeconds = parseDurationOr400(body.duration);
+    const { actionId } = await service.dungeon(player, { durationSeconds, reason, moderator });
+    return summary(player, actionId);
+  }));
+
+  app.post("/api/mod/release", ...modAction(false, async (body, moderator) => {
+    const player = await resolveTarget(body);
+    const { actionId } = await service.release(player, {
+      reason: String(body.reason ?? "").trim() || null,
+      moderator,
+    });
+    return summary(player, actionId);
+  }));
+
+  app.post("/api/mod/kick", ...modAction(false, async (body, moderator) => {
+    const player = await resolveTarget(body);
+    const { actionId } = await service.kick(player, {
+      reason: String(body.reason ?? "").trim() || null,
+      moderator,
+    });
+    return summary(player, actionId);
+  }));
+
+  app.post("/api/mod/warn", ...modAction(false, async (body, moderator) => {
+    const player = await resolveTarget(body);
+    const reason = String(body.reason ?? "").trim();
+    if (!reason) throw bad("Reason is required");
+    const { actionId } = service.warn(player, { reason, moderator });
+    return summary(player, actionId);
+  }));
+
+  app.post("/api/mod/note", ...modAction(false, async (body, moderator) => {
+    const player = await resolveTarget(body);
+    const text = String(body.text ?? "").trim();
+    if (!text) throw bad("Note text is required");
+    const { actionId } = service.note(player, { text, moderator });
+    return summary(player, actionId);
+  }));
+
+  app.delete("/api/mod/actions/:id", requireStaff(true), async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "bad id" });
+    const result = await service.deleteAction(id);
+    if (!result.ok) {
+      if (result.blocked) {
+        return res.status(409).json({
+          error: "That entry backs an ACTIVE ban or dungeon sentence — lift it first, then delete.",
+        });
+      }
+      return res.status(404).json({ error: "no such log entry" });
+    }
+    res.json({ ok: true });
   });
 
   // Evidence files — auth-gated, streamed from EVIDENCE_DIR.

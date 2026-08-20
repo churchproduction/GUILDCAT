@@ -8,12 +8,12 @@ import {
 } from "discord.js";
 import { buildDefinitions, buildHandlers } from "./commands.js";
 
-export async function startBot({ config, queries, roblox }) {
+export async function startBot({ config, queries, roblox, service }) {
   const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
   });
 
-  const { dispatch, isMod } = buildHandlers({ queries, roblox, config });
+  const { dispatch, isMod, isSenior } = buildHandlers({ queries, roblox, config, service });
 
   client.once(Events.ClientReady, async (c) => {
     console.log(`Discord: logged in as ${c.user.tag}`);
@@ -53,6 +53,7 @@ export async function startBot({ config, queries, roblox }) {
           username: member.user.username,
           displayName: member.displayName,
           avatar: member.displayAvatarURL({ size: 64 }),
+          senior: isSenior(member),
         };
       } catch {
         return null; // not in the guild (or fetch failed) → not staff
