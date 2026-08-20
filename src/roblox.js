@@ -10,18 +10,17 @@
 //   API key permission: Messaging Service publish.
 //   Game scripts in roblox/ subscribe and act on the message.
 //
-// Dungeon sentences — Standard DataStores v1 API, so the game can check a
+// Dungeon sentences — Open Cloud v2 DataStores API, so the game can check a
 // player's status the moment they join (works even if they join days later):
-//   {POST|GET|DELETE} https://apis.roblox.com/datastores/v1/universes/{universe}
-//     /standard-datastores/datastore/entries/entry?datastoreName=X&entryKey=Y
-//   API key permission: DataStores (read/write/delete entries).
+//   GET/PATCH/DELETE https://apis.roblox.com/cloud/v2/universes/{universe}
+//     /data-stores/{name}/entries/{key}   (PATCH ?allowMissing=true upserts)
+//   API key permission: universe-datastores.objects create/read/update/delete.
+//   (The old v1 datastores API rejects newer keys with a 403 scope error.)
 //
 // Username lookup and avatars use the public users/thumbnails APIs (no key).
-import crypto from "node:crypto";
 import { clamp } from "./format.js";
 
 const CLOUD = "https://apis.roblox.com/cloud/v2";
-const DATASTORES = "https://apis.roblox.com/datastores/v1";
 
 // Roblox limits on ban reasons.
 const DISPLAY_REASON_MAX = 400;
@@ -71,9 +70,9 @@ export function createRobloxClient({ apiKey, universeId, kickTopic, dungeonTopic
     });
   }
 
-  const dungeonEntryUrl = (userId) =>
-    `${DATASTORES}/universes/${universeId}/standard-datastores/datastore/entries/entry` +
-    `?datastoreName=${encodeURIComponent(dungeonDatastore)}&entryKey=${encodeURIComponent(String(userId))}`;
+  const dungeonEntryUrl = (key, extra = "") =>
+    `${CLOUD}/universes/${universeId}/data-stores/${encodeURIComponent(dungeonDatastore)}` +
+    `/entries/${encodeURIComponent(String(key))}${extra}`;
 
   return {
     /**
@@ -208,21 +207,19 @@ export function createRobloxClient({ apiKey, universeId, kickTopic, dungeonTopic
         at: Math.floor(Date.now() / 1000),
       };
       if (!value.permanent) value.expiresAt = Math.floor(expiresAtUnix);
-      const body = JSON.stringify(value);
-      return apiFetch(dungeonEntryUrl(userId), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "content-md5": crypto.createHash("md5").update(body).digest("base64"),
-        },
-        body,
+      // PATCH with allowMissing=true creates the entry if it doesn't exist.
+      return apiFetch(dungeonEntryUrl(userId, "?allowMissing=true"), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value }),
       });
     },
 
     /** Read the live dungeon sentence; null = none on record. */
     async getDungeonSentence(userId) {
       try {
-        return await apiFetch(dungeonEntryUrl(userId));
+        const data = await apiFetch(dungeonEntryUrl(userId));
+        return data?.value ?? null;
       } catch (err) {
         if (err instanceof RobloxError && err.status === 404) return null;
         throw err;
