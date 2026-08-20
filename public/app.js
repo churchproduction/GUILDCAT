@@ -234,49 +234,19 @@ function evidenceHtml(list) {
 /* ── entrance / session ──────────────────────────────────── */
 
 let me = null;
-let entranceInited = false;
-
-function initEntranceFx() {
-  if (entranceInited) return;
-  entranceInited = true;
-  const el = $("#gctitle");
-  el.innerHTML = [...el.textContent].map((ch, i) =>
-    ch === " " ? `<span style="width:.45em"></span>`
-      : `<span style="animation-delay:${120 + i * 85}ms">${ch}</span>`).join("");
-  if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    const layer = $("#rainlayer");
-    let html = "";
-    for (let i = 0; i < 130; i++) {
-      const far = Math.random() < 0.45;
-      const left = Math.random() * 104 - 2;
-      const h = far ? 9 + Math.random() * 8 : 14 + Math.random() * 14;
-      const dur = (far ? 0.9 + Math.random() * 0.35 : 0.55 + Math.random() * 0.3).toFixed(2);
-      const delay = (-Math.random() * 2).toFixed(2);
-      const op = (far ? 0.35 : 0.5 + Math.random() * 0.5).toFixed(2);
-      html += `<span class="drop${far ? " far" : ""}" style="left:${left}%;height:${h}px;animation-duration:${dur}s;animation-delay:${delay}s;opacity:${op}"></span>`;
-    }
-    layer.innerHTML = html;
-  }
-}
 
 function showEntrance() {
+  // Only shown when signed out — signed-in staff go straight to the panel.
+  if (me) return showPanel();
   $("#shell").hidden = true;
   $("#mtop").hidden = true;
   $("#mnav").hidden = true;
   const e = $("#enter");
-  e.classList.remove("gone");
   e.hidden = false;
-  initEntranceFx();
   $("#enterBtn").onclick = () => {
-    if (me) {
-      e.classList.add("gone");
-      setTimeout(() => { e.hidden = true; }, 700);
-      showPanel();
-    } else {
-      // remember where they were headed (e.g. a #/user/123 link from Discord)
-      try { sessionStorage.setItem("afterLogin", location.hash || "#/"); } catch {}
-      location.href = "/auth/login";
-    }
+    // remember where they were headed (e.g. a #/user/123 link from Discord)
+    try { sessionStorage.setItem("afterLogin", location.hash || "#/"); } catch {}
+    location.href = "/auth/login";
   };
 }
 

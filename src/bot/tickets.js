@@ -15,6 +15,7 @@
 // button that puts a mod into the exact server the report came from.
 import {
   ActionRowBuilder,
+  AttachmentBuilder,
   ButtonBuilder,
   ButtonStyle,
   ChannelType,
@@ -76,7 +77,6 @@ export function createTicketSystem({ client, config, queries }) {
     const res = await fetch(attachment.url);
     if (!res.ok) throw new Error("couldn't download the banner image");
     const ext = (attachment.name?.match(/\.\w+$/) || [".png"])[0];
-    const { AttachmentBuilder } = await import("discord.js");
     return {
       file: new AttachmentBuilder(Buffer.from(await res.arrayBuffer()), { name: name + ext }),
       ref: `attachment://${name}${ext}`,

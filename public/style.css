@@ -293,6 +293,17 @@ a.tile:hover{border-color:var(--line-2)}
 .enter[hidden]{display:none}
 .enter.gone{opacity:0;pointer-events:none}
 
+/* minimal sign-in screen */
+.enter.simple{display:grid;place-items:center}
+.enter.simple[hidden]{display:none}
+.logincard{text-align:center;padding:44px 48px;background:rgba(10,14,23,.72);
+  border:1px solid var(--line-2);border-radius:14px;max-width:340px}
+.logincard h1{font-family:var(--display);font-size:26px;letter-spacing:.3em;color:var(--gold-2);
+  margin:2px 0 0;padding-left:.3em}
+.logincard .esub{animation:none;margin:12px 0 22px}
+.logincard .enterbtn{animation:none;letter-spacing:.06em;font-size:14.5px;white-space:nowrap;padding:13px 26px}
+.logocircle.sm{width:72px;height:72px;margin-bottom:14px;animation:none}
+
 .cbank{position:absolute;left:-55%;width:210%;height:36vh;top:-7vh;filter:blur(22px);opacity:.95;pointer-events:none}
 .cb1{background:
   radial-gradient(19% 55% at 6% 66%,#16233a 0%,transparent 70%),
