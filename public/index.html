@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Warden</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='2' y='2' width='12' height='12' fill='%233987e5'/%3E%3C/svg%3E">
+</head>
+<body>
+  <header class="topbar" id="topbar" hidden>
+    <a class="wordmark" href="#/"><span class="tick"></span>Warden</a>
+    <nav class="nav" id="nav">
+      <a href="#/" data-nav="overview">Overview</a>
+      <a href="#/bans" data-nav="bans">Bans</a>
+      <a href="#/dungeon" data-nav="dungeon">Dungeon</a>
+      <a href="#/actions" data-nav="actions">Actions</a>
+    </nav>
+    <div class="searchbox">
+      <svg class="search-ico" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="globalSearch" type="search" placeholder="Search player, ID, or profile link" autocomplete="off" spellcheck="false">
+      <div class="search-pop" id="searchPop"></div>
+    </div>
+    <div class="userchip" id="userchip"></div>
+  </header>
+
+  <main id="view"></main>
+
+  <script src="app.js"></script>
+</body>
+</html>
